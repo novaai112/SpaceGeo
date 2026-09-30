@@ -136,28 +136,32 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
   const currentModel = AI_MODELS.find((m) => m.id === selectedModel) || AI_MODELS[0]
   const placeholder = isRecording ? t.listening : `${t.askAnything} ${selectedCAD.displayName} ${t.orDescribe}`
 
+  const canSend = (value.trim().length > 0 || !!uploadedImage) && !isStreaming && !disabled
+
   return (
     <div className={cn("fixed bottom-4 left-0 right-0 px-4 pointer-events-none z-10", hasAnimated && "composer-intro")}>
       <div className="relative max-w-2xl mx-auto pointer-events-auto">
-        <div className="sg-composer flex flex-col gap-3 p-4 rounded-3xl overflow-hidden">
+        <div className="sg-composer flex flex-col gap-2 p-3 rounded-3xl overflow-hidden">
 
-          <div className="flex gap-2 items-end">
-            {uploadedImage && (
-              <div className={cn("relative shrink-0", showImageBounce && "image-bounce")}>
-                <div className="w-12 h-12 rounded-lg overflow-hidden" style={{ border: "1px solid var(--border-color)" }}>
-                  <Image src={uploadedImage} alt="Uploaded" width={48} height={48} className="w-full h-full object-cover" />
-                </div>
-                <button
-                  onClick={() => setUploadedImage(null)}
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: "var(--text-primary)", color: "var(--background)" }}
-                  aria-label="Remove image"
-                >
-                  <X className="w-3 h-3" />
-                </button>
+          {/* Uploaded image preview */}
+          {uploadedImage && (
+            <div className={cn("relative self-start", showImageBounce && "image-bounce")}>
+              <div className="w-14 h-14 rounded-xl overflow-hidden" style={{ border: "1px solid var(--border-color)" }}>
+                <Image src={uploadedImage} alt="Uploaded" width={56} height={56} className="w-full h-full object-cover" />
               </div>
-            )}
+              <button
+                onClick={() => setUploadedImage(null)}
+                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full flex items-center justify-center"
+                style={{ background: "var(--text-primary)", color: "var(--background)" }}
+                aria-label="Remove image"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          )}
 
+          {/* Input row — textarea + model icon + orb */}
+          <div className="flex items-end gap-2">
             <textarea
               ref={textareaRef}
               value={value}
@@ -166,18 +170,80 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
               placeholder={placeholder}
               disabled={isStreaming || disabled}
               rows={1}
-              className={cn("flex-1 resize-none bg-transparent px-2 py-1.5 text-sm focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed max-h-[160px] overflow-y-auto")}
+              className={cn(
+                "flex-1 resize-none bg-transparent px-2 py-1.5 text-sm focus:outline-none",
+                "disabled:opacity-50 disabled:cursor-not-allowed max-h-[160px] overflow-y-auto"
+              )}
               style={{ color: "var(--text-primary)", caretColor: "var(--brand-primary)" }}
               aria-label="Message input"
               id="message-input"
             />
 
             {isRecording && (
-              <div className="shrink-0 w-24">
+              <div className="shrink-0 w-20">
                 <AudioWaveform isRecording={isRecording} stream={mediaStream} />
               </div>
             )}
 
+            {/* AI Model Icon — right side of text area, before orb */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  disabled={isStreaming || disabled}
+                  title={currentModel.name}
+                  aria-label={t.selectModel}
+                  id="model-icon-btn"
+                  className="shrink-0 w-7 h-7 rounded-full overflow-hidden flex items-center justify-center transition-all hover:scale-110 hover:ring-2 hover:ring-[var(--brand-primary)] focus:outline-none mb-0.5"
+                  style={{ border: "1.5px solid var(--border-color)", background: "var(--surface-2)" }}
+                >
+                  <Image
+                    src={currentModel.icon}
+                    alt={currentModel.name}
+                    width={22}
+                    height={22}
+                    className="object-contain w-5 h-5"
+                  />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuPortal>
+                <DropdownMenuContent
+                  align="end"
+                  side="top"
+                  sideOffset={10}
+                  className="w-52 px-1.5 py-1.5 rounded-2xl z-[9999]"
+                  style={{
+                    background: "var(--background)",
+                    border: "1px solid var(--border-color)",
+                    boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+                  }}
+                >
+                  {AI_MODELS.map((model) => (
+                    <DropdownMenuItem
+                      key={model.id}
+                      onClick={() => { playClickSound(); onModelChange(model.id) }}
+                      className={cn(
+                        "flex items-center cursor-pointer gap-3 rounded-xl py-2.5 px-2",
+                        selectedModel === model.id && "bg-[var(--brand-subtle)]"
+                      )}
+                      id={`model-${model.id.replace(/\//g, "-")}`}
+                    >
+                      <div className="w-7 h-7 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center" style={{ border: "1px solid var(--border-color)", background: "var(--surface-2)" }}>
+                        <Image src={model.icon} alt={model.name} width={20} height={20} className="object-contain w-5 h-5" />
+                      </div>
+                      <div className="flex flex-col flex-1">
+                        <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{model.shortName}</span>
+                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{model.name}</span>
+                      </div>
+                      {selectedModel === model.id && (
+                        <div className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: "var(--brand-primary)" }} />
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuContent>
+              </DropdownMenuPortal>
+            </DropdownMenu>
+
+            {/* Send / Stop orb */}
             {isStreaming ? (
               <button
                 onClick={() => { playClickSound(); onStop() }}
@@ -191,8 +257,11 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
             ) : (
               <button
                 onClick={handleSend}
-                disabled={(!value.trim() && !uploadedImage) || disabled}
-                className={cn("relative h-9 w-9 shrink-0 rounded-full flex items-center justify-center transition-transform", (!value.trim() && !uploadedImage) || disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer hover:scale-105")}
+                disabled={!canSend}
+                className={cn(
+                  "relative h-9 w-9 shrink-0 rounded-full flex items-center justify-center transition-transform",
+                  !canSend ? "opacity-40 cursor-not-allowed" : "cursor-pointer hover:scale-105"
+                )}
                 aria-label={t.send}
                 id="send-btn"
               >
@@ -201,7 +270,8 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          {/* Bottom toolbar */}
+          <div className="flex items-center gap-1.5">
             <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileSelect} className="hidden" />
 
             <button
@@ -209,10 +279,10 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
               disabled={isStreaming || disabled}
               title={isRecording ? t.stopRecording : t.voiceInput}
               aria-label={isRecording ? t.stopRecording : t.voiceInput}
-              className={cn("sg-btn-icon", isRecording && "animate-bounce-subtle")}
+              className={cn("sg-btn-icon w-7 h-7", isRecording && "animate-bounce-subtle")}
               style={isRecording ? { background: "#EF4444", borderColor: "#EF4444", color: "white" } : {}}
             >
-              {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+              {isRecording ? <MicOff className="w-3.5 h-3.5" /> : <Mic className="w-3.5 h-3.5" />}
             </button>
 
             <button
@@ -221,67 +291,25 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
               title={t.attachImage}
               aria-label={t.attachImage}
               id="attach-image-btn"
-              className="sg-btn-icon"
+              className="sg-btn-icon w-7 h-7"
             >
-              <Paperclip className="w-4 h-4" />
+              <Paperclip className="w-3.5 h-3.5" />
             </button>
 
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button
-                  disabled={isStreaming || disabled}
-                  title={t.selectModel}
-                  aria-label={t.selectModel}
-                  id="model-selector"
-                  className="sg-btn-icon flex items-center gap-1.5 w-auto px-2 h-8"
-                >
-                  <Image
-                    src={currentModel.icon}
-                    alt={currentModel.name}
-                    width={16}
-                    height={16}
-                    className="rounded-sm object-contain flex-shrink-0"
-                  />
-                  <span className="text-xs hidden sm:inline" style={{ color: "var(--text-secondary)" }}>{currentModel.shortName}</span>
-                  <ChevronDown className="w-3 h-3" style={{ color: "var(--text-muted)" }} />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuPortal>
-                <DropdownMenuContent
-                  align="start"
-                  side="top"
-                  sideOffset={8}
-                  className="w-52 px-1.5 py-1.5 rounded-2xl z-[9999]"
-                  style={{ background: "var(--background)", border: "1px solid var(--border-color)", boxShadow: "0 8px 32px rgba(0,0,0,0.2)" }}
-                >
-                  {AI_MODELS.map((model) => (
-                    <DropdownMenuItem
-                      key={model.id}
-                      onClick={() => { playClickSound(); onModelChange(model.id) }}
-                      className={cn("flex items-center cursor-pointer gap-3 rounded-xl py-2 px-2", selectedModel === model.id && "bg-[var(--brand-subtle)]")}
-                      id={`model-${model.id.replace(/\//g, "-")}`}
-                    >
-                      <Image
-                        src={model.icon}
-                        alt={model.name}
-                        width={20}
-                        height={20}
-                        className="rounded-sm object-contain w-5 h-5 flex-shrink-0"
-                      />
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>{model.shortName}</span>
-                        <span className="text-xs" style={{ color: "var(--text-muted)" }}>{model.name}</span>
-                      </div>
-                      {selectedModel === model.id && (
-                        <div className="ml-auto w-2 h-2 rounded-full" style={{ background: "var(--brand-primary)" }} />
-                      )}
-                    </DropdownMenuItem>
-                  ))}
-                </DropdownMenuContent>
-              </DropdownMenuPortal>
-            </DropdownMenu>
+            {/* Model name label (small, bottom left) */}
+            <div className="flex items-center gap-1 ml-0.5">
+              <Image
+                src={currentModel.icon}
+                alt={currentModel.name}
+                width={14}
+                height={14}
+                className="object-contain opacity-60"
+              />
+              <span className="text-xs" style={{ color: "var(--text-muted)" }}>{currentModel.shortName}</span>
+            </div>
 
             <div className="flex-1" />
+
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>{selectedCAD.displayName}</span>
           </div>
         </div>

@@ -1,7 +1,14 @@
 import { NextRequest } from "next/server"
 import { getSystemPrompt } from "@/lib/cad-software"
 
-// ─── Helper: SSE stream from OpenAI-compatible API ───────────────────────────
+const GEMINI_API_KEY = process.env["Gemini_API_KEY"] || ""
+const GEMINI_MODELS = [
+  "gemini-2.0-flash",
+  "gemini-2.0-flash-001",
+  "gemini-1.5-flash",
+  "gemini-1.5-flash-latest",
+]
+
 function makeOpenAIStream(responseBody: ReadableStream): ReadableStream {
   const encoder = new TextEncoder()
   return new ReadableStream({
@@ -9,15 +16,12 @@ function makeOpenAIStream(responseBody: ReadableStream): ReadableStream {
       const reader = responseBody.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
         buffer = lines.pop() || ""
-
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             const data = line.slice(6).trim()
@@ -35,67 +39,57 @@ function makeOpenAIStream(responseBody: ReadableStream): ReadableStream {
   })
 }
 
-// ─── Gemini (Google AI) ───────────────────────────────────────────────────────
-async function callGemini(
-  messages: any[],
+async function callGeminiWithModel(
+  modelName: string,
+  contents: any[],
   systemPrompt: string,
-  imageData?: string
-): Promise<ReadableStream> {
-  const apiKey = process.env["Gemini_API_KEY"]
-  if (!apiKey) throw new Error("Gemini_API_KEY not set in .env.local")
-
-  const contents: any[] = []
-  for (let i = 0; i < messages.length; i++) {
-    const msg = messages[i]
-    const isLast = i === messages.length - 1
-
-    if (msg.role === "user") {
-      const parts: any[] = []
-      if (isLast && imageData && imageData.startsWith("data:image/")) {
-        const [header, base64Data] = imageData.split(",")
-        const mimeType = header.match(/data:([^;]+)/)?.[1] || "image/jpeg"
-        parts.push({ inlineData: { mimeType, data: base64Data } })
-      }
-      parts.push({ text: msg.content || "Describe this image for CAD modeling" })
-      contents.push({ role: "user", parts })
-    } else {
-      contents.push({ role: "model", parts: [{ text: msg.content }] })
-    }
-  }
+): Promise<ReadableStream | null> {
+  const encoder = new TextEncoder()
 
   const response = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:streamGenerateContent?alt=sse&key=${apiKey}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:streamGenerateContent?alt=sse`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        "x-goog-api-key": GEMINI_API_KEY,
+      },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: systemPrompt }] },
         contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 8192 },
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 8192,
+          topK: 40,
+          topP: 0.95,
+        },
+        safetySettings: [
+          { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+          { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" },
+        ],
       }),
     },
   )
 
   if (!response.ok) {
+    if (response.status === 429 || response.status === 503) return null
     const err = await response.text()
-    throw new Error(`Gemini API error ${response.status}: ${err}`)
+    throw new Error(`Gemini ${modelName} error ${response.status}: ${err.slice(0, 200)}`)
   }
 
-  const encoder = new TextEncoder()
   return new ReadableStream({
     async start(controller) {
       const reader = response.body!.getReader()
       const decoder = new TextDecoder()
       let buffer = ""
-
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split("\n")
         buffer = lines.pop() || ""
-
         for (const line of lines) {
           if (line.startsWith("data: ")) {
             const data = line.slice(6).trim()
@@ -113,23 +107,49 @@ async function callGemini(
   })
 }
 
-// ─── OpenRouter (GPT-4o and Claude) ──────────────────────────────────────────
-async function callOpenRouter(
-  messages: any[],
-  modelId: string,
-  systemPrompt: string,
-  imageData?: string,
-): Promise<ReadableStream> {
-  const apiKey = process.env["API_KEY"]
-  if (!apiKey) throw new Error("API_KEY (OpenRouter) not set in .env.local")
-
-  const orMessages: any[] = [{ role: "system", content: systemPrompt }]
+async function callGemini(messages: any[], systemPrompt: string, imageData?: string): Promise<ReadableStream> {
+  const contents: any[] = []
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i]
     const isLast = i === messages.length - 1
+    if (msg.role === "user") {
+      const parts: any[] = []
+      if (isLast && imageData && imageData.startsWith("data:image/")) {
+        const [header, base64Data] = imageData.split(",")
+        const mimeType = header.match(/data:([^;]+)/)?.[1] || "image/jpeg"
+        parts.push({ inlineData: { mimeType, data: base64Data } })
+      }
+      parts.push({ text: msg.content || "Describe this image for CAD modeling" })
+      contents.push({ role: "user", parts })
+    } else {
+      contents.push({ role: "model", parts: [{ text: msg.content || "" }] })
+    }
+  }
 
-    if (msg.role === "user" && isLast && imageData && imageData.startsWith("data:image/")) {
+  for (const model of GEMINI_MODELS) {
+    try {
+      const stream = await callGeminiWithModel(model, contents, systemPrompt)
+      if (stream) return stream
+      console.log(`Gemini model ${model} unavailable, trying next...`)
+    } catch (err: any) {
+      if (!err.message?.includes("429") && !err.message?.includes("503")) throw err
+      console.log(`Gemini model ${model} quota exceeded, trying next...`)
+    }
+  }
+
+  throw new Error("All Gemini models are currently unavailable. Please try again in a moment.")
+}
+
+async function callOpenRouter(messages: any[], modelId: string, systemPrompt: string, imageData?: string): Promise<ReadableStream> {
+  const apiKey = process.env["API_KEY"]
+  if (!apiKey) throw new Error("API_KEY (OpenRouter) not configured")
+
+  const orMessages: any[] = [{ role: "system", content: systemPrompt }]
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]
+    const isLast = i === messages.length - 1
+    if (msg.role === "user" && isLast && imageData?.startsWith("data:image/")) {
       orMessages.push({
         role: "user",
         content: [
@@ -142,16 +162,21 @@ async function callOpenRouter(
     }
   }
 
+  const orModelMap: Record<string, string> = {
+    "openai/gpt-4o": "openai/gpt-4o",
+    "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4-5",
+  }
+
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${apiKey}`,
-      "HTTP-Referer": "https://spacegeo.ai",
+      "HTTP-Referer": "https://space-geo.vercel.app",
       "X-Title": "SpaceGeo AI",
     },
     body: JSON.stringify({
-      model: modelId,
+      model: orModelMap[modelId] ?? modelId,
       messages: orMessages,
       stream: true,
       max_tokens: 8192,
@@ -161,39 +186,27 @@ async function callOpenRouter(
 
   if (!response.ok) {
     const err = await response.text()
-    throw new Error(`OpenRouter API error ${response.status}: ${err}`)
+    throw new Error(`OpenRouter error ${response.status}: ${err.slice(0, 200)}`)
   }
 
   return makeOpenAIStream(response.body!)
 }
 
-// ─── Main POST Handler ────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
     const { messages, model, cadSoftware } = await req.json()
 
-    if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: "Invalid request: messages array required" }), {
+    if (!messages || !Array.isArray(messages) || messages.length === 0) {
+      return new Response(JSON.stringify({ error: "messages array required" }), {
         status: 400,
         headers: { "Content-Type": "application/json" },
       })
     }
 
-    if (messages.length === 0) {
-      return new Response(JSON.stringify({ error: "No messages provided" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      })
-    }
-
-    // Get system prompt based on selected CAD software
     const systemPrompt = getSystemPrompt(cadSoftware || "solidworks")
-
-    // Extract image from last user message
     const lastMsg = messages[messages.length - 1]
     const imageData = lastMsg?.role === "user" ? lastMsg?.imageData : undefined
 
-    // Clean messages
     const cleanMessages = messages
       .map((m: any) => ({
         role: m.role,
@@ -205,23 +218,13 @@ export async function POST(req: NextRequest) {
     let stream: ReadableStream
 
     if (selectedModel.startsWith("google/") || selectedModel.includes("gemini")) {
-      try {
-        stream = await callGemini(cleanMessages, systemPrompt, imageData)
-      } catch (error: any) {
-        if (error.message?.includes("429")) {
-          console.log("Gemini quota exceeded, falling back to GPT-4o via OpenRouter...")
-          stream = await callOpenRouter(cleanMessages, "openai/gpt-4o", systemPrompt, imageData)
-        } else {
-          throw error
-        }
-      }
+      stream = await callGemini(cleanMessages, systemPrompt, imageData)
     } else {
-      const orModelMap: Record<string, string> = {
-        "openai/gpt-4o": "openai/gpt-4o",
-        "anthropic/claude-sonnet-4": "anthropic/claude-sonnet-4-5",
+      try {
+        stream = await callOpenRouter(cleanMessages, selectedModel, systemPrompt, imageData)
+      } catch {
+        stream = await callGemini(cleanMessages, systemPrompt, imageData)
       }
-      const orModel = orModelMap[selectedModel] ?? selectedModel
-      stream = await callOpenRouter(cleanMessages, orModel, systemPrompt, imageData)
     }
 
     return new Response(stream, {
@@ -234,9 +237,7 @@ export async function POST(req: NextRequest) {
   } catch (error) {
     console.error("SpaceGeo AI error:", error)
     return new Response(
-      JSON.stringify({
-        error: error instanceof Error ? error.message : "An unexpected error occurred",
-      }),
+      JSON.stringify({ error: error instanceof Error ? error.message : "Unexpected error" }),
       { status: 500, headers: { "Content-Type": "application/json" } },
     )
   }

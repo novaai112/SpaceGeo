@@ -123,14 +123,15 @@ export function SpaceGeoShell() {
   const checkCADConnection = useCallback(async () => {
     setCadStatus("checking")
     try {
-      if (selectedCAD.id === "creo") {
-        const res = await fetch("http://localhost:9056/creoson", { signal: AbortSignal.timeout(2000) })
-        if (res.ok) { setCadStatus("online"); return }
-      }
-      const res = await fetch(`http://localhost:7800/status?software=${selectedCAD.id}`, { signal: AbortSignal.timeout(2000) })
+      const res = await fetch(`/api/cad-status?software=${encodeURIComponent(selectedCAD.id)}`, {
+        signal: AbortSignal.timeout(5000),
+      })
       if (res.ok) {
         const data = await res.json()
-        if (data.running) { setCadStatus("online"); return }
+        if (data.running === true) {
+          setCadStatus("online")
+          return
+        }
       }
     } catch {}
     setCadStatus("offline")
