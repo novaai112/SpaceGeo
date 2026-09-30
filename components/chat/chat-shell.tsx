@@ -37,7 +37,7 @@ function getGuestId(): string {
   return id
 }
 
-export type AIModel = "google/gemini-2.0-flash-001" | "openai/gpt-4o" | "anthropic/claude-sonnet-4"
+export type AIModel = "google/gemini-3.8-flash" | "openai/gpt-4o" | "anthropic/claude-sonnet-4"
 
 export function SpaceGeoShell() {
   const { isDark } = useTheme()
@@ -51,7 +51,7 @@ export function SpaceGeoShell() {
   const [isStreaming, setIsStreaming] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isLoaded, setIsLoaded] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<AIModel>("google/gemini-2.0-flash-001")
+  const [selectedModel, setSelectedModel] = useState<AIModel>("google/gemini-3.8-flash")
   const [selectedCAD, setSelectedCAD] = useState<CADSoftware>(CAD_SOFTWARE_LIST[0])
   const [cadStatus, setCadStatus] = useState<"checking" | "online" | "offline">("offline")
   const [dailyUsage, setDailyUsage] = useState({ used: 0, limit: 50 })
@@ -122,10 +122,17 @@ export function SpaceGeoShell() {
 
   const checkCADConnection = useCallback(async () => {
     setCadStatus("checking")
+
+    if (selectedCAD.id === "onshape") {
+      setCadStatus("online")
+      return
+    }
+
     try {
-      const res = await fetch(`/api/cad-status?software=${encodeURIComponent(selectedCAD.id)}`, {
-        signal: AbortSignal.timeout(5000),
-      })
+      const res = await fetch(
+        `http://localhost:7800/status?software=${encodeURIComponent(selectedCAD.id)}`,
+        { signal: AbortSignal.timeout(4000), mode: "cors" }
+      )
       if (res.ok) {
         const data = await res.json()
         if (data.running === true) {
@@ -134,6 +141,7 @@ export function SpaceGeoShell() {
         }
       }
     } catch {}
+
     setCadStatus("offline")
   }, [selectedCAD])
 

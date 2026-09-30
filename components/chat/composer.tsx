@@ -19,7 +19,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 
 export const AI_MODELS: { id: AIModel; name: string; icon: string; shortName: string }[] = [
-  { id: "google/gemini-2.0-flash-001", name: "Gemini 2.0 Flash", shortName: "Gemini", icon: "/images/google.webp" },
+  { id: "google/gemini-3.8-flash", name: "Gemini 3.8 Flash", shortName: "Gemini", icon: "/images/google.webp" },
   { id: "openai/gpt-4o", name: "GPT-4o", shortName: "GPT-4o", icon: "/images/gpt.png" },
   { id: "anthropic/claude-sonnet-4", name: "Claude Sonnet 4", shortName: "Claude", icon: "/images/claude.svg" },
 ]
