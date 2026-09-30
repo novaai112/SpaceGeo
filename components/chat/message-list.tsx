@@ -7,6 +7,7 @@ import { TypingIndicator } from "./typing-indicator"
 import { AlertCircle, RefreshCw } from "lucide-react"
 import { AnimatedOrb } from "./animated-orb"
 import type { CADSoftware } from "@/lib/cad-software"
+import { useLang } from "@/lib/lang-context"
 
 interface MessageListProps {
   messages: Message[]
@@ -30,6 +31,7 @@ export function MessageList({
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
+  const { t } = useLang()
   const rafRef = useRef<number | null>(null)
   const [hasAnimated, setHasAnimated] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -133,14 +135,13 @@ export function MessageList({
             className={`text-xl font-semibold mb-2 ${hasAnimated ? "text-blur-intro" : ""}`}
             style={{ color: "var(--text-primary)" }}
           >
-            What would you like to build?
+            {t.whatBuild}
           </p>
           <p
             className={`text-sm max-w-xs ${hasAnimated ? "text-blur-intro-delay" : ""}`}
             style={{ color: "var(--text-secondary)", lineHeight: 1.6 }}
           >
-            Describe your part, its dimensions, and the details that matter. We&apos;ll build it
-            together in {selectedCAD.displayName}.
+            {t.describeModel} {selectedCAD.displayName}.
           </p>
         </div>
       )}
@@ -191,7 +192,7 @@ export function MessageList({
             aria-label="Retry"
           >
             <RefreshCw className="w-4 h-4" />
-            Retry
+            {t.retry}
           </button>
         </div>
       )}

@@ -2,17 +2,14 @@ import type React from "react"
 import type { Metadata, Viewport } from "next"
 import "./globals.css"
 import { ThemeProvider } from "@/lib/theme-context"
+import { LangProvider } from "@/lib/lang-context"
 
 export const metadata: Metadata = {
   title: "SpaceGeo AI — CAD Automation with AI",
-  description:
-    "Create SolidWorks, CATIA, Inventor, Fusion 360, NX, Creo, SpaceClaim, Onshape & Solid Edge 3D models instantly from text prompts or images. Powered by Gemini, GPT-4o, and Claude.",
+  description: "Create SolidWorks, CATIA, Inventor, Fusion 360, NX, Creo, SpaceClaim, Onshape & Solid Edge 3D models instantly from text prompts or images.",
   generator: "SpaceGeo.ai",
   keywords: ["CAD AI", "SolidWorks AI", "CAD automation", "3D modeling AI", "SpaceGeo"],
-  icons: {
-    icon: "/favicon.jpg",
-    apple: "/favicon.jpg",
-  },
+  icons: { icon: "/favicon.jpg", apple: "/favicon.jpg" },
 }
 
 export const viewport: Viewport = {
@@ -23,11 +20,7 @@ export const viewport: Viewport = {
   userScalable: false,
 }
 
-export default function RootLayout({
-  children,
-}: Readonly<{
-  children: React.ReactNode
-}>) {
+export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className="dark">
       <head>
@@ -35,7 +28,9 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>
       <body className="antialiased font-sans">
-        <ThemeProvider>{children}</ThemeProvider>
+        <ThemeProvider>
+          <LangProvider>{children}</LangProvider>
+        </ThemeProvider>
       </body>
     </html>
   )
