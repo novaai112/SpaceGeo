@@ -72,7 +72,7 @@ export function SettingsPanel({
     { id: "always-allow", label: t.execAlwaysAllow },
   ]
 
-  const currentExec = EXEC_MODES.find((m) => m.id === executionMode) || EXEC_MODES[1]
+  const currentExec = EXEC_MODES.find((m) => m.id === executionMode) || EXEC_MODES[2]
 
   return (
     <>

@@ -16,6 +16,8 @@ interface MessageListProps {
   onRetry: () => void
   isLoaded: boolean
   selectedCAD: CADSoftware
+  executionMode?: string
+  userId?: string
 }
 
 const LAUNCH_SOUND_URL =
@@ -28,6 +30,8 @@ export function MessageList({
   onRetry,
   isLoaded,
   selectedCAD,
+  executionMode = "always-allow",
+  userId = "guest",
 }: MessageListProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [autoScroll, setAutoScroll] = useState(true)
@@ -158,6 +162,9 @@ export function MessageList({
             key={message.id}
             message={message}
             isStreaming={isStreaming && message.role === "assistant" && message === lastMessage}
+            cadSoftware={selectedCAD.id}
+            executionMode={executionMode as any}
+            userId={userId}
           />
         ))}
 

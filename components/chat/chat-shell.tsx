@@ -56,7 +56,7 @@ export function SpaceGeoShell() {
   const [cadStatus, setCadStatus] = useState<"checking" | "online" | "offline">("offline")
   const [dailyUsage, setDailyUsage] = useState({ used: 0, limit: 50 })
   const [usagePopupOpen, setUsagePopupOpen] = useState(false)
-  const [executionMode, setExecutionMode] = useState("ask-first")
+  const [executionMode, setExecutionMode] = useState("always-allow")
   const abortControllerRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -340,6 +340,8 @@ export function SpaceGeoShell() {
           onRetry={retry}
           isLoaded={isLoaded}
           selectedCAD={selectedCAD}
+          executionMode={executionMode}
+          userId={typeof window !== "undefined" ? (localStorage.getItem("sg-guest-id") || "guest") : "guest"}
         />
 
         <Composer
