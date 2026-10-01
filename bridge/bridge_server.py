@@ -317,22 +317,29 @@ def execute_spaceclaim_script(script, script_name="sg_macro.py"):
 
 class BridgeHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args): print(f"[Bridge] {fmt % args}")
+    def log_error(self, fmt, *args): pass
     def send_json(self, data, status=200):
-        body = json.dumps(data, indent=2).encode()
-        self.send_response(status)
-        self.send_header("Content-Type","application/json")
-        self.send_header("Content-Length",str(len(body)))
-        self.send_header("Access-Control-Allow-Origin","*")
-        self.send_header("Access-Control-Allow-Methods","GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers","Content-Type")
-        self.end_headers()
-        self.wfile.write(body)
+        try:
+            body = json.dumps(data, indent=2).encode()
+            self.send_response(status)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+            self.wfile.write(body)
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
     def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header("Access-Control-Allow-Origin","*")
-        self.send_header("Access-Control-Allow-Methods","GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers","Content-Type")
-        self.end_headers()
+        try:
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+        except (ConnectionAbortedError, ConnectionResetError, BrokenPipeError):
+            pass
     def do_GET(self):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
