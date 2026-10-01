@@ -199,79 +199,30 @@ def _find_sc_exe():
         if os.path.exists(p): return p
     return None
 
-def execute_spaceclaim_script(script, script_name="sg_macro.py"):
+def _run_sc_automation(sc_hwnd, macro_path):
     import time, ctypes
-    macro_dir = os.path.join(os.environ.get("APPDATA", tempfile.gettempdir()), "SpaceClaim", "Macros")
-    os.makedirs(macro_dir, exist_ok=True)
-    macro_path = os.path.join(macro_dir, script_name)
-    with open(macro_path, "w", encoding="utf-8") as f:
-        f.write(script)
-
-    clipboard_ok = False
     try:
-        import win32clipboard
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardText(macro_path)
-        win32clipboard.CloseClipboard()
-        clipboard_ok = True
+        ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
+        time.sleep(0.3)
+        ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
+        time.sleep(1.2)
     except Exception:
         pass
-
-    sc_hwnd = _find_sc_hwnd()
-
-    def _clipboard_fallback():
-        return {
-            "success": True,
-            "message": f"SpaceClaim focused. Path copied to clipboard.\n\nIn SpaceClaim:\nFile \u2192 Scripting \u2192 Run Script \u2192 Ctrl+V \u2192 Enter",
-            "scriptPath": macro_path,
-            "clipboardReady": clipboard_ok,
-            "method": "manual_with_clipboard",
-        }
-
-    if not sc_hwnd:
-        sc_exe = _find_sc_exe()
-        if sc_exe:
-            subprocess.Popen([sc_exe, f"/RunScript={macro_path}"])
-            return {
-                "success": True,
-                "message": "SpaceClaim launching with your script. A new window will open.",
-                "scriptPath": macro_path,
-                "method": "launch_with_script",
-            }
-        return {
-            "success": False,
-            "message": f"SpaceClaim not found.\nScript saved to: {macro_path}\nOpen SpaceClaim \u2192 File \u2192 Scripting \u2192 Run Script",
-            "scriptPath": macro_path,
-            "clipboardReady": clipboard_ok,
-        }
 
     try:
         from pywinauto import Desktop
         from pywinauto.keyboard import send_keys
-        import time
-
         app_desktop = Desktop(backend="uia")
         sc_win = app_desktop.window(handle=sc_hwnd)
         sc_win.set_focus()
-        time.sleep(1.0)
+        time.sleep(0.5)
         send_keys("{ESC}", pause=0.05)
         time.sleep(0.3)
-
-        ran_ok = False
-
         try:
             sc_win.menu_select("File->Scripting->Run Script")
             time.sleep(1.5)
-            ran_ok = True
         except Exception:
-            pass
-
-        if not ran_ok:
-            for seq in [
-                "%fsr",
-                "%{F10}sr",
-            ]:
+            for seq in ["%fsr", "%{F10}sr", "%FSR"]:
                 try:
                     send_keys("{ESC}", pause=0.05)
                     time.sleep(0.2)
@@ -279,7 +230,6 @@ def execute_spaceclaim_script(script, script_name="sg_macro.py"):
                     time.sleep(0.3)
                     send_keys(seq, pause=0.15)
                     time.sleep(1.5)
-                    ran_ok = True
                     break
                 except Exception:
                     pass
@@ -305,44 +255,74 @@ def execute_spaceclaim_script(script, script_name="sg_macro.py"):
                 except Exception:
                     send_keys("{ENTER}", pause=0.05)
                 time.sleep(4.0)
-                return {
-                    "success": True,
-                    "message": "Script executed in SpaceClaim. Model should appear now.",
-                    "scriptPath": macro_path,
-                    "method": "keyboard_automation",
-                }
-            except Exception as e:
+            except Exception:
                 send_keys("^v{ENTER}", pause=0.1)
                 time.sleep(4.0)
-                return {
-                    "success": True,
-                    "message": "Script sent to SpaceClaim dialog. Check for new model.",
-                    "scriptPath": macro_path,
-                    "method": "keyboard_automation",
-                }
         else:
             send_keys("^v{ENTER}", pause=0.1)
             time.sleep(4.0)
-            return {
-                "success": True,
-                "message": "Script command sent. If model didn\u2019t appear, use the 4-step guide below.",
-                "scriptPath": macro_path,
-                "method": "manual_with_clipboard",
-                "clipboardReady": clipboard_ok,
-            }
-
     except ImportError:
+        pass
+    except Exception:
+        pass
+
+
+def execute_spaceclaim_script(script, script_name="sg_macro.py"):
+    import time, ctypes
+    macro_dir = os.path.join(os.environ.get("APPDATA", tempfile.gettempdir()), "SpaceClaim", "Macros")
+    os.makedirs(macro_dir, exist_ok=True)
+    macro_path = os.path.join(macro_dir, script_name)
+    with open(macro_path, "w", encoding="utf-8") as f:
+        f.write(script)
+
+    clipboard_ok = False
+    try:
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(macro_path)
+        win32clipboard.CloseClipboard()
+        clipboard_ok = True
+    except Exception:
+        pass
+
+    sc_hwnd = _find_sc_hwnd()
+
+    if sc_hwnd:
         try:
-            import win32gui, win32api, win32con
-            ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
-            ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
-            time.sleep(1.2)
+            import ctypes as _ct
+            _ct.windll.user32.ShowWindow(sc_hwnd, 9)
+            _ct.windll.user32.SetForegroundWindow(sc_hwnd)
         except Exception:
             pass
-        return _clipboard_fallback()
-    except Exception:
-        return _clipboard_fallback()
 
+        t = threading.Thread(target=_run_sc_automation, args=(sc_hwnd, macro_path), daemon=True)
+        t.start()
+
+        return {
+            "success": True,
+            "message": "SpaceClaim focused! Navigating File \u2192 Scripting \u2192 Run Script\u2026\n\nIf model doesn\u2019t appear in ~15s, use manual steps below.",
+            "scriptPath": macro_path,
+            "clipboardReady": clipboard_ok,
+            "method": "keyboard_automation",
+        }
+
+    sc_exe = _find_sc_exe()
+    if sc_exe:
+        subprocess.Popen([sc_exe, f"/RunScript={macro_path}"])
+        return {
+            "success": True,
+            "message": "SpaceClaim launching with your script. A new window will open.",
+            "scriptPath": macro_path,
+            "method": "launch_with_script",
+        }
+
+    return {
+        "success": False,
+        "message": f"SpaceClaim not found.\nScript saved to: {macro_path}\nOpen SpaceClaim \u2192 File \u2192 Scripting \u2192 Run Script",
+        "scriptPath": macro_path,
+        "clipboardReady": clipboard_ok,
+    }
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
