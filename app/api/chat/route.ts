@@ -11,6 +11,18 @@ const GEMINI_MODELS = [
   "gemini-1.5-flash",
 ]
 
+async function fetchCADContext(cadSoftware: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const res = await fetch(
+      `http://localhost:7800/context?software=${encodeURIComponent(cadSoftware)}`,
+      { signal: AbortSignal.timeout(4000) }
+    )
+    if (res.ok) return await res.json()
+  } catch {}
+  return undefined
+}
+
+
 function makeOpenAIStream(responseBody: ReadableStream): ReadableStream {
   const encoder = new TextEncoder()
   return new ReadableStream({
@@ -205,7 +217,9 @@ export async function POST(req: NextRequest) {
       })
     }
 
-    const systemPrompt = getSystemPrompt(cadSoftware || "solidworks")
+    const cadContext = await fetchCADContext(cadSoftware || "solidworks")
+    const systemPrompt = getSystemPrompt(cadSoftware || "solidworks", cadContext)
+
     const lastMsg = messages[messages.length - 1]
     const imageData = lastMsg?.role === "user" ? lastMsg?.imageData : undefined
 

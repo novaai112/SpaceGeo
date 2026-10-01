@@ -76,13 +76,38 @@ export function MessageBubble({
         >
           <div className={cn(isUser ? "px-4 py-2.5" : "px-4 py-3")}>
             {isUser ? (
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 {message.imageData && (
-                  <div className="w-20 h-20 rounded-lg overflow-hidden" style={{ border: "1px solid rgba(0,0,0,0.1)" }}>
-                    <Image src={message.imageData} alt="Uploaded" width={80} height={80} className="w-full h-full object-cover" />
+                  <div className="relative self-end">
+                    <div
+                      className="relative rounded-xl overflow-hidden"
+                      style={{
+                        width: 200,
+                        height: 160,
+                        border: "2px solid rgba(234,179,8,0.5)",
+                        boxShadow: "0 0 16px rgba(234,179,8,0.25)",
+                      }}
+                    >
+                      <Image
+                        src={message.imageData}
+                        alt="Uploaded"
+                        fill
+                        className="object-cover"
+                      />
+                      <div
+                        className="absolute bottom-2 right-2 pointer-events-none"
+                        style={{ filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.8))" }}
+                      >
+                        <svg width="20" height="24" viewBox="0 0 20 24" fill="none">
+                          <path d="M2 2L2 18L6 14L8.5 20L10.5 19.2L8 13L13 13L2 2Z" fill="white" stroke="rgba(0,0,0,0.6)" strokeWidth="1.5" strokeLinejoin="round" />
+                        </svg>
+                      </div>
+                    </div>
                   </div>
                 )}
-                <p className="text-sm whitespace-pre-wrap break-words font-medium">{message.content}</p>
+                {message.content && (
+                  <p className="text-sm whitespace-pre-wrap break-words font-medium">{message.content}</p>
+                )}
               </div>
             ) : (
               <div className="sg-prose">

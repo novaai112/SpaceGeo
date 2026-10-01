@@ -453,34 +453,66 @@ export function getCADSoftware(id: string): CADSoftware | undefined {
   return CAD_SOFTWARE_LIST.find((s) => s.id === id)
 }
 
-export function getSystemPrompt(softwareId: string): string {
+export function getSystemPrompt(softwareId: string, cadContext?: Record<string, unknown>): string {
   const sw = getCADSoftware(softwareId) || CAD_SOFTWARE_LIST[0]
-  
-  return `You are SpaceGeo AI — an advanced CAD engineering assistant specializing in ${sw.displayName} and all major CAD platforms. You have deep expertise in:
 
-## Your Core Capabilities:
-1. **${sw.displayName} Model Creation**: Generate complete, executable ${sw.scriptLanguage === "python" ? "Python" : "code"} scripts using the ${sw.connectionMethod} to create any 3D model from text prompts or image analysis.
-2. **Error Auto-Fixing**: If a script has errors, automatically diagnose and provide corrected code — always produce a working solution.
-3. **Image to CAD**: Analyze uploaded images and generate ${sw.displayName} scripts to recreate the geometry.
-4. **CAD Explanation**: Explain ${sw.displayName} features, operations, sketches, assemblies, and analysis.
-5. **Multi-CAD Support**: You know SolidWorks, SpaceClaim, Inventor, CATIA, Fusion 360, Creo, NX, Onshape, and Solid Edge.
+  let contextBlock = ""
+  if (cadContext && cadContext.running) {
+    const lines: string[] = []
+    if (cadContext.active_doc) lines.push(`- Active Document: ${cadContext.active_doc} (${cadContext.doc_type || "Unknown"})`)
+    if (cadContext.doc_path) lines.push(`- File Path: ${cadContext.doc_path}`)
+    if (cadContext.active_config) lines.push(`- Active Configuration: ${cadContext.active_config}`)
+    if (cadContext.units) lines.push(`- Units: ${cadContext.units}`)
+    if (cadContext.material) lines.push(`- Material: ${cadContext.material}`)
+    if (Array.isArray(cadContext.open_documents) && (cadContext.open_documents as string[]).length > 0) {
+      lines.push(`- Open Documents: ${(cadContext.open_documents as string[]).join(", ")}`)
+    }
+    if (Array.isArray(cadContext.configurations) && (cadContext.configurations as string[]).length > 0) {
+      lines.push(`- Configurations: ${(cadContext.configurations as string[]).join(", ")}`)
+    }
+    if (Array.isArray(cadContext.features) && (cadContext.features as unknown[]).length > 0) {
+      const featList = (cadContext.features as Array<{name: string; type: string}>).slice(0, 20).map(f => `${f.name}(${f.type})`).join(", ")
+      lines.push(`- Existing Features: ${featList}`)
+    }
+    if (Array.isArray(cadContext.bodies) && (cadContext.bodies as string[]).length > 0) {
+      lines.push(`- Solid Bodies: ${(cadContext.bodies as string[]).join(", ")}`)
+    }
+    if (Array.isArray(cadContext.components) && (cadContext.components as string[]).length > 0) {
+      lines.push(`- Assembly Components: ${(cadContext.components as string[]).join(", ")}`)
+    }
+    if (Array.isArray(cadContext.selection) && (cadContext.selection as unknown[]).length > 0) {
+      lines.push(`- Selected Objects: ${(cadContext.selection as unknown[]).length} object(s) currently selected`)
+    }
+    if (lines.length > 0) {
+      contextBlock = `\n\n## LIVE ${sw.displayName} STATE (currently open on user machine):\n${lines.join("\n")}\n\nIMPORTANT: Use this live context. Connect to this EXACT open document. Respect the existing features, units, and configuration. Do not create a new document unless the user explicitly asks.`
+    }
+  } else if (cadContext && !cadContext.running) {
+    contextBlock = `\n\n## ${sw.displayName} STATE: Not currently running. Your code MUST launch it automatically.`
+  }
 
-## ${sw.displayName} Script Template:
-\`\`\`${sw.scriptLanguage}
-${sw.macroTemplate}
-\`\`\`
+  return `You are SpaceGeo AI — an elite ${sw.displayName} automation engineer. You write production-quality Python scripts that run immediately and produce correct 3D geometry.
+${contextBlock}
 
-## Response Format:
-- **For model creation requests**: Always provide a complete, runnable script + brief explanation
-- **For questions/analysis**: Provide clear, professional engineering explanations
-- **For errors**: Diagnose the issue and provide fixed code immediately
-- **For image analysis**: Describe the geometry and then generate a ${sw.displayName} script
+## ABSOLUTE CODE RULES — NEVER BREAK THESE:
+1. Write COMPLETE, FULLY RUNNABLE Python code — every line, no truncation, no "add rest here"
+2. ZERO comments in code — no # comments, no docstrings, nothing — ONLY executable code
+3. ZERO placeholder values — use real numbers, real paths, real API calls
+4. Code MUST connect to ${sw.displayName} via COM (win32com.client.GetActiveObject) or launch it automatically
+5. Code MUST actually create/modify geometry — not just print success messages
+6. If image provided: analyze exact dimensions/geometry and generate code matching that shape precisely
+7. Never refuse — always generate working code
 
-## Important Behavior:
-- NEVER say "I cannot create ${sw.displayName} models" — always generate the script
-- Always fix errors automatically without asking
-- The script must connect to ${sw.displayName} or launch it automatically
-- Always create geometrically correct and manufacturable models
-- When the user requests to run the code, generate a Python script that can be executed locally
-- Include comments explaining every step clearly`
+## When ${sw.displayName} is running with an open document:
+- Use GetActiveObject("SldWorks.Application") and swApp.ActiveDoc
+- Work on the EXISTING document unless user says to create new
+- Respect current units from context
+
+## When ${sw.displayName} is NOT running:
+- Launch it: subprocess.Popen(path); time.sleep(12); swApp = win32com.client.Dispatch("SldWorks.Application")
+
+## After every code block: Write 1 sentence describing what the script creates.
+
+## For errors/regeneration: Write ONLY the corrected complete code. No explanations of what was wrong.
+
+## Multi-CAD support: SolidWorks, Inventor, CATIA, Fusion 360, SpaceClaim, Creo, NX, Solid Edge, Onshape`
 }

@@ -58,6 +58,8 @@ export function SpaceGeoShell() {
   const [usagePopupOpen, setUsagePopupOpen] = useState(false)
   const [executionMode, setExecutionMode] = useState("always-allow")
   const abortControllerRef = useRef<AbortController | null>(null)
+  const retryRef = useRef<(() => void) | null>(null)
+
 
   useEffect(() => {
     const storedCAD = localStorage.getItem("sg-cad-software")
@@ -280,6 +282,24 @@ export function SpaceGeoShell() {
       setTimeout(() => sendMessage(lastUser.content, lastUser.imageData), 100)
     }
   }, [messages, sendMessage])
+
+  const regenerate = useCallback(() => {
+    if (messages.length === 0) return
+    const lastUser = [...messages].reverse().find((m) => m.role === "user")
+    if (lastUser) {
+      const idx = messages.findIndex((m) => m.id === lastUser.id)
+      const trimmed = messages.slice(0, idx)
+      setMessages(trimmed)
+      setError(null)
+      setTimeout(() => sendMessage(lastUser.content + "\n\nRegenerate: write the complete correct code without any comments, fully runnable.", lastUser.imageData), 100)
+    }
+  }, [messages, sendMessage])
+
+  useEffect(() => {
+    const handler = () => regenerate()
+    window.addEventListener("sg-regenerate", handler)
+    return () => window.removeEventListener("sg-regenerate", handler)
+  }, [regenerate])
 
   const handleCADChange = (cad: CADSoftware) => {
     setSelectedCAD(cad)
