@@ -1,4 +1,4 @@
-﻿import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
@@ -162,6 +162,36 @@ def execute_python_script(script, software):
     except subprocess.TimeoutExpired: return {"success": False, "message": "Script timed out after 60s"}
     except Exception as e: return {"success": False, "message": str(e)}
 
+def execute_spaceclaim_script(script, script_name="sg_macro.py"):
+    sc_paths = [
+        r"C:\Program Files\ANSYS Inc\v241\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v232\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v231\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v222\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v221\scdm\SpaceClaim.exe",
+        r"C:\Program Files\SpaceClaim\SpaceClaim.exe",
+    ]
+    macro_dir = os.path.join(os.environ.get("APPDATA",""), "SpaceClaim", "Macros")
+    os.makedirs(macro_dir, exist_ok=True)
+    macro_path = os.path.join(macro_dir, script_name)
+    with open(macro_path, "w", encoding="utf-8") as f:
+        f.write(script)
+    sc_exe = None
+    for p in sc_paths:
+        if os.path.exists(p):
+            sc_exe = p
+            break
+    if not sc_exe:
+        procs = get_running_processes()
+        if "spaceclaim.exe" in procs:
+            return {"success": True, "message": f"Script saved to {macro_path}. SpaceClaim is running — open it and run via Scripting > Run Script.", "scriptPath": macro_path}
+        return {"success": False, "message": "SpaceClaim not found. Script saved to: " + macro_path, "scriptPath": macro_path}
+    procs = get_running_processes()
+    if "spaceclaim.exe" not in procs:
+        subprocess.Popen([sc_exe], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        import time; time.sleep(12)
+    return {"success": True, "message": f"Script saved to {macro_path}. In SpaceClaim: File > Scripting > Run Script, select this file.", "scriptPath": macro_path}
+
 class BridgeHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args): print(f"[Bridge] {fmt % args}")
     def send_json(self, data, status=200):
@@ -208,6 +238,11 @@ class BridgeHandler(BaseHTTPRequestHandler):
             script = data.get("script","")
             if not script: self.send_json({"error":"No script"},400); return
             self.send_json(execute_python_script(script, data.get("software","")))
+        elif parsed.path == "/spaceclaim":
+            script = data.get("script","")
+            if not script: self.send_json({"error":"No script"},400); return
+            script_name = data.get("scriptName", "sg_macro.py")
+            self.send_json(execute_spaceclaim_script(script, script_name))
         else: self.send_json({"error":"Unknown endpoint"},404)
 
 def main():

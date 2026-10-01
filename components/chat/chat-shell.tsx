@@ -6,6 +6,7 @@ import { Header } from "./header"
 import { MessageList } from "./message-list"
 import { Composer } from "./composer"
 import { SettingsPanel } from "./settings-panel"
+import { SpaceClaimPanel } from "./spaceclaim-panel"
 import { useTheme } from "@/lib/theme-context"
 import { useLang } from "@/lib/lang-context"
 import { supabase } from "@/lib/supabase"
@@ -60,6 +61,23 @@ export function SpaceGeoShell() {
   const abortControllerRef = useRef<AbortController | null>(null)
   const retryRef = useRef<(() => void) | null>(null)
 
+  const [scPanelOpen, setScPanelOpen] = useState(false)
+  const [scModelType, setScModelType] = useState<"shell" | "shell_nozzle" | "head_nozzle" | "head">("shell")
+
+  function detectSCIntent(text: string): "shell" | "shell_nozzle" | "head_nozzle" | "head" | null {
+    const t = text.toLowerCase()
+    if (selectedCAD.id !== "spaceclaim") return null
+    const shellNozzle = (t.includes("shell nozzle") || (t.includes("nozzle") && t.includes("shell") && !t.includes("head")))
+    const headNozzle = (t.includes("head nozzle") || (t.includes("nozzle") && t.includes("head")))
+    const nozzle = t.includes("nozzle") && !shellNozzle && !headNozzle
+    const shell = (t.includes("shell") || t.includes("cylinder") || t.includes("vessel")) && !t.includes("nozzle")
+    const head = (t.includes("head") || t.includes("ellips") || t.includes("flat head") || t.includes("tori")) && !t.includes("nozzle")
+    if (headNozzle) return "head_nozzle"
+    if (shellNozzle || nozzle) return "shell_nozzle"
+    if (shell) return "shell"
+    if (head) return "head"
+    return null
+  }
 
   useEffect(() => {
     const storedCAD = localStorage.getItem("sg-cad-software")
@@ -191,6 +209,13 @@ export function SpaceGeoShell() {
   const sendMessage = useCallback(async (content: string, imageData?: string) => {
     if ((!content.trim() && !imageData) || isStreaming) return
     setError(null)
+
+    const scIntent = detectSCIntent(content)
+    if (scIntent && !imageData) {
+      setScModelType(scIntent)
+      setScPanelOpen(true)
+      return
+    }
 
     let sessionId = activeSessionId
     if (!sessionId) {
@@ -385,6 +410,13 @@ export function SpaceGeoShell() {
           dailyUsage={dailyUsage}
           executionMode={executionMode}
           onExecutionModeChange={handleExecutionModeChange}
+        />
+      )}
+
+      {scPanelOpen && (
+        <SpaceClaimPanel
+          modelType={scModelType}
+          onClose={() => setScPanelOpen(false)}
         />
       )}
     </div>

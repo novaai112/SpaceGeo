@@ -2,7 +2,7 @@
 
 import type React from "react"
 import { useState, useRef, useCallback, type KeyboardEvent, useEffect } from "react"
-import { Square, Mic, MicOff, Paperclip, X, ChevronDown } from "lucide-react"
+import { Square, Mic, MicOff, Paperclip, X, ChevronDown, Layers } from "lucide-react"
 import { cn } from "@/lib/utils"
 import Image from "next/image"
 import { AnimatedOrb } from "./animated-orb"
@@ -309,6 +309,24 @@ export function Composer({ onSend, onStop, isStreaming, disabled, selectedModel,
             </div>
 
             <div className="flex-1" />
+
+            {selectedCAD.id === "spaceclaim" && (
+              <div className="flex items-center gap-1">
+                {(["Shell", "Nozzle", "Head"] as const).map(label => (
+                  <button
+                    key={label}
+                    onClick={() => onSend(`Create ${label}`)}
+                    disabled={isStreaming || disabled}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-semibold transition-all hover:scale-105"
+                    style={{ background: "rgba(234,179,8,0.12)", border: "1px solid rgba(234,179,8,0.3)", color: "#eab308" }}
+                    title={`Build ${label} in SpaceClaim`}
+                  >
+                    <Layers className="w-3 h-3" />
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <span className="text-xs" style={{ color: "var(--text-muted)" }}>{selectedCAD.displayName}</span>
           </div>
