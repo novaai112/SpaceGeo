@@ -163,34 +163,75 @@ def execute_python_script(script, software):
     except Exception as e: return {"success": False, "message": str(e)}
 
 def execute_spaceclaim_script(script, script_name="sg_macro.py"):
-    sc_paths = [
-        r"C:\Program Files\ANSYS Inc\v241\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v232\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v231\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v222\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v221\scdm\SpaceClaim.exe",
-        r"C:\Program Files\SpaceClaim\SpaceClaim.exe",
-    ]
-    macro_dir = os.path.join(os.environ.get("APPDATA",""), "SpaceClaim", "Macros")
+    macro_dir = os.path.join(os.environ.get("APPDATA", tempfile.gettempdir()), "SpaceClaim", "Macros")
     os.makedirs(macro_dir, exist_ok=True)
     macro_path = os.path.join(macro_dir, script_name)
     with open(macro_path, "w", encoding="utf-8") as f:
         f.write(script)
+
     sc_exe = None
-    for p in sc_paths:
-        if os.path.exists(p):
-            sc_exe = p
-            break
+    sc_pid = None
+    if HAS_PSUTIL:
+        for proc in psutil.process_iter(["name", "exe", "pid"]):
+            try:
+                if "spaceclaim" in proc.info["name"].lower():
+                    sc_exe = proc.info["exe"]
+                    sc_pid = proc.info["pid"]
+                    break
+            except Exception:
+                pass
+
     if not sc_exe:
-        procs = get_running_processes()
-        if "spaceclaim.exe" in procs:
-            return {"success": True, "message": f"Script saved to {macro_path}. SpaceClaim is running — open it and run via Scripting > Run Script.", "scriptPath": macro_path}
-        return {"success": False, "message": "SpaceClaim not found. Script saved to: " + macro_path, "scriptPath": macro_path}
-    procs = get_running_processes()
-    if "spaceclaim.exe" not in procs:
-        subprocess.Popen([sc_exe], creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
-        import time; time.sleep(12)
-    return {"success": True, "message": f"Script saved to {macro_path}. In SpaceClaim: File > Scripting > Run Script, select this file.", "scriptPath": macro_path}
+        known = [
+            r"C:\Program Files\ANSYS Inc\v241\scdm\SpaceClaim.exe",
+            r"C:\Program Files\ANSYS Inc\v232\scdm\SpaceClaim.exe",
+            r"C:\Program Files\ANSYS Inc\v231\scdm\SpaceClaim.exe",
+            r"C:\Program Files\ANSYS Inc\v222\scdm\SpaceClaim.exe",
+            r"C:\Program Files\ANSYS Inc\v221\scdm\SpaceClaim.exe",
+            r"C:\Program Files\ANSYS Inc\v212\scdm\SpaceClaim.exe",
+            r"C:\Program Files\SpaceClaim\SpaceClaim.exe",
+        ]
+        for p in known:
+            if os.path.exists(p):
+                sc_exe = p
+                break
+
+    if not sc_exe:
+        return {
+            "success": False,
+            "message": f"SpaceClaim not found or not running. Script saved to:\n{macro_path}\n\nManually run: File > Scripting > Run Script",
+            "scriptPath": macro_path,
+        }
+
+    try:
+        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
+        proc = subprocess.Popen(
+            [sc_exe, f"/RunScript={macro_path}"],
+            creationflags=flags,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        import time
+        time.sleep(2)
+        still_running = proc.poll() is None
+        if still_running or proc.returncode in (0, None):
+            return {
+                "success": True,
+                "message": f"Script executed in SpaceClaim. Model should appear in Design1 now.",
+                "scriptPath": macro_path,
+            }
+        return {
+            "success": False,
+            "message": f"SpaceClaim returned exit code {proc.returncode}. Script at:\n{macro_path}",
+            "scriptPath": macro_path,
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "message": f"Error running script in SpaceClaim: {e}\nScript saved to: {macro_path}",
+            "scriptPath": macro_path,
+        }
+
 
 class BridgeHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args): print(f"[Bridge] {fmt % args}")
