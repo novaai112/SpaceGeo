@@ -212,59 +212,87 @@ def _run_sc_automation(sc_hwnd, macro_path):
     try:
         from pywinauto import Desktop
         from pywinauto.keyboard import send_keys
+
         app_desktop = Desktop(backend="uia")
         sc_win = app_desktop.window(handle=sc_hwnd)
         sc_win.set_focus()
         time.sleep(0.5)
         send_keys("{ESC}", pause=0.05)
         time.sleep(0.3)
-        try:
-            sc_win.menu_select("File->Scripting->Run Script")
-            time.sleep(1.5)
-        except Exception:
-            for seq in ["%fsr", "%{F10}sr", "%FSR"]:
-                try:
-                    send_keys("{ESC}", pause=0.05)
-                    time.sleep(0.2)
-                    sc_win.set_focus()
-                    time.sleep(0.3)
-                    send_keys(seq, pause=0.15)
-                    time.sleep(1.5)
-                    break
-                except Exception:
-                    pass
 
-        open_dialog = None
-        for title_re in [r"Run Script", r"Open", r"Select.*Script", r"Python"]:
+        # Step 1: click the Design ribbon tab so Script button is visible
+        for tab_title in ["Design", "Design "]:
             try:
-                dlg = app_desktop.window(title_re=title_re, top_level_only=True)
-                if dlg.exists(timeout=2):
-                    open_dialog = dlg
+                tab = sc_win.child_window(title=tab_title, control_type="TabItem")
+                if tab.exists(timeout=1):
+                    tab.click_input()
+                    time.sleep(0.5)
                     break
             except Exception:
                 pass
 
-        if open_dialog:
+        # Step 2: click the Script button on the Design ribbon
+        script_editor_opened = False
+        for btn_title in ["Script", "Scripting", "Script Editor"]:
             try:
-                fn_edit = open_dialog.child_window(control_type="Edit")
-                fn_edit.set_text("")
-                fn_edit.type_keys(macro_path, with_spaces=True)
-                time.sleep(0.2)
-                try:
-                    open_dialog.child_window(title_re="Open|Run|OK").click_input()
-                except Exception:
-                    send_keys("{ENTER}", pause=0.05)
-                time.sleep(4.0)
+                btn = sc_win.child_window(title=btn_title, control_type="Button")
+                if btn.exists(timeout=1):
+                    btn.click_input()
+                    time.sleep(1.5)
+                    script_editor_opened = True
+                    break
             except Exception:
-                send_keys("^v{ENTER}", pause=0.1)
-                time.sleep(4.0)
-        else:
-            send_keys("^v{ENTER}", pause=0.1)
-            time.sleep(4.0)
+                pass
+
+        if not script_editor_opened:
+            # Try via split button or custom control
+            try:
+                btn = sc_win.child_window(title_re="Script.*", control_type="SplitButton")
+                btn.click_input()
+                time.sleep(1.5)
+                script_editor_opened = True
+            except Exception:
+                pass
+
+        # Step 3: open the file in the Script Editor
+        # Script Editor should now be focused - use Ctrl+O to open file dialog
+        sc_win.set_focus()
+        time.sleep(0.5)
+        send_keys("^o", pause=0.1)
+        time.sleep(1.5)
+
+        # Handle the file open dialog - type path and press Enter
+        # First try clicking filename field and pasting
+        try:
+            open_dlg = app_desktop.top_window()
+            fn_edit = open_dlg.child_window(control_type="Edit")
+            fn_edit.set_text("")
+            fn_edit.type_keys(macro_path, with_spaces=True)
+            time.sleep(0.2)
+            try:
+                open_dlg.child_window(title_re="Open|Run|OK").click_input()
+            except Exception:
+                send_keys("{ENTER}", pause=0.05)
+        except Exception:
+            # Fallback: select all + paste from clipboard
+            send_keys("^a", pause=0.05)
+            time.sleep(0.1)
+            send_keys("^v", pause=0.05)
+            time.sleep(0.2)
+            send_keys("{ENTER}", pause=0.05)
+        time.sleep(1.5)
+
+        # Step 4: press F5 to run the script in the editor
+        sc_win.set_focus()
+        time.sleep(0.5)
+        send_keys("{F5}", pause=0.05)
+        time.sleep(6.0)
+
     except ImportError:
         pass
     except Exception:
         pass
+
 
 
 def execute_spaceclaim_script(script, script_name="sg_macro.py"):
