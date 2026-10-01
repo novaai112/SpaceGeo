@@ -179,26 +179,8 @@ export async function POST(req: NextRequest) {
     const varBlock = buildVariableBlock(vars)
     const fullScript = `${varBlock}\n${scriptBody}`
 
-    let execResult: Record<string, unknown> = { success: false, message: "Bridge not running" }
-    try {
-      const bridgeRes = await fetch("http://localhost:7800/spaceclaim", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ script: fullScript, scriptName: scriptFile }),
-        signal: AbortSignal.timeout(30000),
-      })
-      if (bridgeRes.ok) {
-        execResult = await bridgeRes.json()
-      } else {
-        execResult = { success: false, message: `Bridge error ${bridgeRes.status}` }
-      }
-    } catch {
-      execResult = { success: false, message: "Bridge not running. Start bridge/START_BRIDGE.bat first." }
-    }
-
     return NextResponse.json({
-      success: execResult.success,
-      message: execResult.message,
+      success: true,
       scriptUsed: scriptFile,
       variables: vars,
       fullScript,

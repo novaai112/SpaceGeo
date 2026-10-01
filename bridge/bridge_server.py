@@ -248,19 +248,21 @@ class BridgeHandler(BaseHTTPRequestHandler):
 def main():
     port = 7800
     print("="*55)
-    print("  SpaceGeo AI - Local CAD Bridge Server v2.0")
+    print("  SpaceGeo AI - Local CAD Bridge Server v2.1")
     print("="*55)
     print(f"  Listening on: http://localhost:{port}")
     print(f"  psutil: {HAS_PSUTIL}")
     print()
     print("  GET  /health  /status?software=  /all  /installed")
     print("  GET  /context?software=solidworks")
-    print("  POST /execute  { software, script }")
+    print("  POST /execute       { software, script }")
+    print("  POST /spaceclaim    { script, scriptName }")
     print()
     print("  Press Ctrl+C to stop")
     print("="*55)
     server = HTTPServer(("localhost", port), BridgeHandler)
     try: server.serve_forever()
     except KeyboardInterrupt: print("\n  Bridge stopped."); server.server_close()
+
 
 if __name__ == "__main__": main()

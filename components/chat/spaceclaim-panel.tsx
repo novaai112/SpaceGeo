@@ -225,16 +225,44 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
     }
 
     try {
-      const res = await fetch("/api/spaceclaim", {
+      const apiRes = await fetch("/api/spaceclaim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ modelType: effectiveModelType, params }),
       })
-      const data = await res.json()
-      setResult(data)
-      setRunState(data.success ? "success" : "error")
+      const apiData = await apiRes.json()
+
+      if (!apiData.success) {
+        setResult({ success: false, message: apiData.error || "Failed to build script" })
+        setRunState("error")
+        return
+      }
+
+      let bridgeResult: ScriptResult
+      try {
+        const bridgeRes = await fetch("http://localhost:7800/spaceclaim", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script: apiData.fullScript, scriptName: apiData.scriptUsed }),
+          signal: AbortSignal.timeout(15000),
+          mode: "cors",
+        })
+        if (bridgeRes.ok) {
+          bridgeResult = await bridgeRes.json()
+        } else {
+          bridgeResult = { success: false, message: `Bridge responded with error ${bridgeRes.status}` }
+        }
+      } catch {
+        bridgeResult = {
+          success: false,
+          message: "Cannot reach bridge on localhost:7800. Make sure bridge_server.py is running (run bridge/START_BRIDGE.bat).",
+        }
+      }
+
+      setResult(bridgeResult)
+      setRunState(bridgeResult.success ? "success" : "error")
     } catch {
-      setResult({ success: false, message: "Network error — is the dev server running?" })
+      setResult({ success: false, message: "Network error reaching /api/spaceclaim" })
       setRunState("error")
     }
   }, [modelType, values, nozzleType, headType, nozzlePosition])
