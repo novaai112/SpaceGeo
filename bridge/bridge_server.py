@@ -1,5 +1,6 @@
-import json, os, subprocess, sys, tempfile
+import json, os, subprocess, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
 
 try:
@@ -419,9 +420,12 @@ def main():
     print()
     print("  Press Ctrl+C to stop")
     print("="*55)
-    server = HTTPServer(("localhost", port), BridgeHandler)
+    class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+        daemon_threads = True
+    server = ThreadingHTTPServer(("localhost", port), BridgeHandler)
     try: server.serve_forever()
     except KeyboardInterrupt: print("\n  Bridge stopped."); server.server_close()
+
 
 
 if __name__ == "__main__": main()

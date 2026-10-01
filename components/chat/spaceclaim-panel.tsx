@@ -240,13 +240,15 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
         return
       }
 
+      setResult({ success: true, message: "Script ready — automating SpaceClaim now…", method: "keyboard_automation" })
+
       let bridgeResult: ScriptResult
       try {
         const bridgeRes = await fetch("http://localhost:7800/spaceclaim", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ script: apiData.fullScript, scriptName: apiData.scriptUsed }),
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.timeout(90000),
           mode: "cors",
         })
         if (bridgeRes.ok) {
