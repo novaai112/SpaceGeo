@@ -214,104 +214,133 @@ def execute_spaceclaim_script(script, script_name="sg_macro.py"):
         win32clipboard.SetClipboardText(macro_path)
         win32clipboard.CloseClipboard()
         clipboard_ok = True
-    except Exception: pass
+    except Exception:
+        pass
 
     sc_hwnd = _find_sc_hwnd()
 
-    if sc_hwnd:
-        try:
-            import win32gui, win32api, win32con
-            ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
-            time.sleep(0.3)
-            ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
-            time.sleep(1.0)
+    def _clipboard_fallback():
+        return {
+            "success": True,
+            "message": f"SpaceClaim focused. Path copied to clipboard.\n\nIn SpaceClaim:\nFile \u2192 Scripting \u2192 Run Script \u2192 Ctrl+V \u2192 Enter",
+            "scriptPath": macro_path,
+            "clipboardReady": clipboard_ok,
+            "method": "manual_with_clipboard",
+        }
 
-            def key_tap(vk, delay=0.08):
-                win32api.keybd_event(vk, 0, 0, 0)
-                time.sleep(delay)
-                win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
-                time.sleep(delay)
-
-            def key_char(ch, delay=0.08):
-                key_tap(win32api.VkKeyScan(ch) & 0xFF, delay)
-
-            key_tap(win32con.VK_ESCAPE)
-            time.sleep(0.3)
-
-            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
-            time.sleep(0.08)
-            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
-            time.sleep(0.5)
-
-            key_char('F')
-            time.sleep(0.5)
-
-            for _ in range(15):
-                item_text_list = []
-                def enum_menu_cb(hwnd2, _):
-                    try:
-                        cls = win32gui.GetClassName(hwnd2)
-                        if cls in ("#32768", "Menu"):
-                            item_text_list.append(hwnd2)
-                    except: pass
-                win32gui.EnumWindows(enum_menu_cb, None)
-                if item_text_list:
-                    break
-                time.sleep(0.1)
-
-            key_char('I')
-            time.sleep(0.4)
-            key_char('R')
-            time.sleep(1.2)
-
-            key_tap(win32con.VK_CONTROL)
-            win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-            win32api.keybd_event(ord('A'), 0, 0, 0)
-            time.sleep(0.05)
-            win32api.keybd_event(ord('A'), 0, win32con.KEYEVENTF_KEYUP, 0)
-            win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-            time.sleep(0.1)
-
-            win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
-            win32api.keybd_event(ord('V'), 0, 0, 0)
-            time.sleep(0.05)
-            win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
-            win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
-            time.sleep(0.3)
-
-            key_tap(win32con.VK_RETURN)
-            time.sleep(3.0)
-
-            return {
-                "success": True,
-                "message": "Script sent to SpaceClaim via keyboard automation. Model should be created now.",
-                "scriptPath": macro_path,
-                "method": "keyboard_automation",
-            }
-        except Exception as e:
-            return {
-                "success": True,
-                "message": f"SpaceClaim focused. Script path copied to clipboard.\n\nIn SpaceClaim: File \u2192 Scripting \u2192 Run Script \u2192 press Ctrl+V \u2192 Enter\n\nPath: {macro_path}",
-                "scriptPath": macro_path,
-                "clipboardReady": clipboard_ok,
-                "method": "manual_with_clipboard",
-            }
-    else:
+    if not sc_hwnd:
         sc_exe = _find_sc_exe()
         if sc_exe:
             subprocess.Popen([sc_exe, f"/RunScript={macro_path}"])
             return {
                 "success": True,
-                "message": f"SpaceClaim launching with script. A new window will open with your model.",
+                "message": "SpaceClaim launching with your script. A new window will open.",
                 "scriptPath": macro_path,
                 "method": "launch_with_script",
             }
         return {
             "success": False,
-            "message": f"SpaceClaim not detected.\nScript saved to clipboard + file:\n{macro_path}\n\nOpen SpaceClaim \u2192 File \u2192 Scripting \u2192 Run Script \u2192 Ctrl+V \u2192 Enter",
+            "message": f"SpaceClaim not found.\nScript saved to: {macro_path}\nOpen SpaceClaim \u2192 File \u2192 Scripting \u2192 Run Script",
             "scriptPath": macro_path,
             "clipboardReady": clipboard_ok,
         }
+
+    try:
+        from pywinauto import Desktop
+        from pywinauto.keyboard import send_keys
+        import time
+
+        app_desktop = Desktop(backend="uia")
+        sc_win = app_desktop.window(handle=sc_hwnd)
+        sc_win.set_focus()
+        time.sleep(1.0)
+        send_keys("{ESC}", pause=0.05)
+        time.sleep(0.3)
+
+        ran_ok = False
+
+        try:
+            sc_win.menu_select("File->Scripting->Run Script")
+            time.sleep(1.5)
+            ran_ok = True
+        except Exception:
+            pass
+
+        if not ran_ok:
+            for seq in [
+                "%fsr",
+                "%{F10}sr",
+            ]:
+                try:
+                    send_keys("{ESC}", pause=0.05)
+                    time.sleep(0.2)
+                    sc_win.set_focus()
+                    time.sleep(0.3)
+                    send_keys(seq, pause=0.15)
+                    time.sleep(1.5)
+                    ran_ok = True
+                    break
+                except Exception:
+                    pass
+
+        open_dialog = None
+        for title_re in [r"Run Script", r"Open", r"Select.*Script", r"Python"]:
+            try:
+                dlg = app_desktop.window(title_re=title_re, top_level_only=True)
+                if dlg.exists(timeout=2):
+                    open_dialog = dlg
+                    break
+            except Exception:
+                pass
+
+        if open_dialog:
+            try:
+                fn_edit = open_dialog.child_window(control_type="Edit")
+                fn_edit.set_text("")
+                fn_edit.type_keys(macro_path, with_spaces=True)
+                time.sleep(0.2)
+                try:
+                    open_dialog.child_window(title_re="Open|Run|OK").click_input()
+                except Exception:
+                    send_keys("{ENTER}", pause=0.05)
+                time.sleep(4.0)
+                return {
+                    "success": True,
+                    "message": "Script executed in SpaceClaim. Model should appear now.",
+                    "scriptPath": macro_path,
+                    "method": "keyboard_automation",
+                }
+            except Exception as e:
+                send_keys("^v{ENTER}", pause=0.1)
+                time.sleep(4.0)
+                return {
+                    "success": True,
+                    "message": "Script sent to SpaceClaim dialog. Check for new model.",
+                    "scriptPath": macro_path,
+                    "method": "keyboard_automation",
+                }
+        else:
+            send_keys("^v{ENTER}", pause=0.1)
+            time.sleep(4.0)
+            return {
+                "success": True,
+                "message": "Script command sent. If model didn\u2019t appear, use the 4-step guide below.",
+                "scriptPath": macro_path,
+                "method": "manual_with_clipboard",
+                "clipboardReady": clipboard_ok,
+            }
+
+    except ImportError:
+        try:
+            import win32gui, win32api, win32con
+            ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
+            ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
+            time.sleep(1.2)
+        except Exception:
+            pass
+        return _clipboard_fallback()
+    except Exception:
+        return _clipboard_fallback()
 
 
 
