@@ -162,75 +162,157 @@ def execute_python_script(script, software):
     except subprocess.TimeoutExpired: return {"success": False, "message": "Script timed out after 60s"}
     except Exception as e: return {"success": False, "message": str(e)}
 
+def _find_sc_hwnd():
+    try:
+        import win32gui
+        result = []
+        def cb(hwnd, _):
+            try:
+                import win32gui as wg
+                if wg.IsWindowVisible(hwnd):
+                    title = wg.GetWindowText(hwnd)
+                    if "SpaceClaim" in title and "Bridge" not in title:
+                        result.append((hwnd, title))
+            except Exception: pass
+        win32gui.EnumWindows(cb, None)
+        return result[0][0] if result else None
+    except Exception: return None
+
+def _find_sc_exe():
+    if HAS_PSUTIL:
+        for proc in psutil.process_iter(["name","exe"]):
+            try:
+                if "spaceclaim" in proc.info["name"].lower():
+                    return proc.info["exe"]
+            except Exception: pass
+    known = [
+        r"C:\Program Files\ANSYS Inc\v241\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v232\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v231\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v222\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v221\scdm\SpaceClaim.exe",
+        r"C:\Program Files\ANSYS Inc\v212\scdm\SpaceClaim.exe",
+        r"C:\Program Files\SpaceClaim\SpaceClaim.exe",
+    ]
+    for p in known:
+        if os.path.exists(p): return p
+    return None
+
 def execute_spaceclaim_script(script, script_name="sg_macro.py"):
+    import time, ctypes
     macro_dir = os.path.join(os.environ.get("APPDATA", tempfile.gettempdir()), "SpaceClaim", "Macros")
     os.makedirs(macro_dir, exist_ok=True)
     macro_path = os.path.join(macro_dir, script_name)
     with open(macro_path, "w", encoding="utf-8") as f:
         f.write(script)
 
-    sc_exe = None
-    sc_pid = None
-    if HAS_PSUTIL:
-        for proc in psutil.process_iter(["name", "exe", "pid"]):
-            try:
-                if "spaceclaim" in proc.info["name"].lower():
-                    sc_exe = proc.info["exe"]
-                    sc_pid = proc.info["pid"]
-                    break
-            except Exception:
-                pass
-
-    if not sc_exe:
-        known = [
-            r"C:\Program Files\ANSYS Inc\v241\scdm\SpaceClaim.exe",
-            r"C:\Program Files\ANSYS Inc\v232\scdm\SpaceClaim.exe",
-            r"C:\Program Files\ANSYS Inc\v231\scdm\SpaceClaim.exe",
-            r"C:\Program Files\ANSYS Inc\v222\scdm\SpaceClaim.exe",
-            r"C:\Program Files\ANSYS Inc\v221\scdm\SpaceClaim.exe",
-            r"C:\Program Files\ANSYS Inc\v212\scdm\SpaceClaim.exe",
-            r"C:\Program Files\SpaceClaim\SpaceClaim.exe",
-        ]
-        for p in known:
-            if os.path.exists(p):
-                sc_exe = p
-                break
-
-    if not sc_exe:
-        return {
-            "success": False,
-            "message": f"SpaceClaim not found or not running. Script saved to:\n{macro_path}\n\nManually run: File > Scripting > Run Script",
-            "scriptPath": macro_path,
-        }
-
+    clipboard_ok = False
     try:
-        flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-        proc = subprocess.Popen(
-            [sc_exe, f"/RunScript={macro_path}"],
-            creationflags=flags,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        )
-        import time
-        time.sleep(2)
-        still_running = proc.poll() is None
-        if still_running or proc.returncode in (0, None):
+        import win32clipboard
+        win32clipboard.OpenClipboard()
+        win32clipboard.EmptyClipboard()
+        win32clipboard.SetClipboardText(macro_path)
+        win32clipboard.CloseClipboard()
+        clipboard_ok = True
+    except Exception: pass
+
+    sc_hwnd = _find_sc_hwnd()
+
+    if sc_hwnd:
+        try:
+            import win32gui, win32api, win32con
+            ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
+            time.sleep(0.3)
+            ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
+            time.sleep(1.0)
+
+            def key_tap(vk, delay=0.08):
+                win32api.keybd_event(vk, 0, 0, 0)
+                time.sleep(delay)
+                win32api.keybd_event(vk, 0, win32con.KEYEVENTF_KEYUP, 0)
+                time.sleep(delay)
+
+            def key_char(ch, delay=0.08):
+                key_tap(win32api.VkKeyScan(ch) & 0xFF, delay)
+
+            key_tap(win32con.VK_ESCAPE)
+            time.sleep(0.3)
+
+            win32api.keybd_event(win32con.VK_MENU, 0, 0, 0)
+            time.sleep(0.08)
+            win32api.keybd_event(win32con.VK_MENU, 0, win32con.KEYEVENTF_KEYUP, 0)
+            time.sleep(0.5)
+
+            key_char('F')
+            time.sleep(0.5)
+
+            for _ in range(15):
+                item_text_list = []
+                def enum_menu_cb(hwnd2, _):
+                    try:
+                        cls = win32gui.GetClassName(hwnd2)
+                        if cls in ("#32768", "Menu"):
+                            item_text_list.append(hwnd2)
+                    except: pass
+                win32gui.EnumWindows(enum_menu_cb, None)
+                if item_text_list:
+                    break
+                time.sleep(0.1)
+
+            key_char('I')
+            time.sleep(0.4)
+            key_char('R')
+            time.sleep(1.2)
+
+            key_tap(win32con.VK_CONTROL)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+            win32api.keybd_event(ord('A'), 0, 0, 0)
+            time.sleep(0.05)
+            win32api.keybd_event(ord('A'), 0, win32con.KEYEVENTF_KEYUP, 0)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+            time.sleep(0.1)
+
+            win32api.keybd_event(win32con.VK_CONTROL, 0, 0, 0)
+            win32api.keybd_event(ord('V'), 0, 0, 0)
+            time.sleep(0.05)
+            win32api.keybd_event(ord('V'), 0, win32con.KEYEVENTF_KEYUP, 0)
+            win32api.keybd_event(win32con.VK_CONTROL, 0, win32con.KEYEVENTF_KEYUP, 0)
+            time.sleep(0.3)
+
+            key_tap(win32con.VK_RETURN)
+            time.sleep(3.0)
+
             return {
                 "success": True,
-                "message": f"Script executed in SpaceClaim. Model should appear in Design1 now.",
+                "message": "Script sent to SpaceClaim via keyboard automation. Model should be created now.",
                 "scriptPath": macro_path,
+                "method": "keyboard_automation",
+            }
+        except Exception as e:
+            return {
+                "success": True,
+                "message": f"SpaceClaim focused. Script path copied to clipboard.\n\nIn SpaceClaim: File \u2192 Scripting \u2192 Run Script \u2192 press Ctrl+V \u2192 Enter\n\nPath: {macro_path}",
+                "scriptPath": macro_path,
+                "clipboardReady": clipboard_ok,
+                "method": "manual_with_clipboard",
+            }
+    else:
+        sc_exe = _find_sc_exe()
+        if sc_exe:
+            subprocess.Popen([sc_exe, f"/RunScript={macro_path}"])
+            return {
+                "success": True,
+                "message": f"SpaceClaim launching with script. A new window will open with your model.",
+                "scriptPath": macro_path,
+                "method": "launch_with_script",
             }
         return {
             "success": False,
-            "message": f"SpaceClaim returned exit code {proc.returncode}. Script at:\n{macro_path}",
+            "message": f"SpaceClaim not detected.\nScript saved to clipboard + file:\n{macro_path}\n\nOpen SpaceClaim \u2192 File \u2192 Scripting \u2192 Run Script \u2192 Ctrl+V \u2192 Enter",
             "scriptPath": macro_path,
+            "clipboardReady": clipboard_ok,
         }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": f"Error running script in SpaceClaim: {e}\nScript saved to: {macro_path}",
-            "scriptPath": macro_path,
-        }
+
 
 
 class BridgeHandler(BaseHTTPRequestHandler):

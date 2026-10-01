@@ -17,6 +17,8 @@ interface ScriptResult {
   message: string
   scriptPath?: string
   scriptUsed?: string
+  method?: string
+  clipboardReady?: boolean
 }
 
 const FIELD_GROUPS = {
@@ -428,27 +430,51 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
 
           {result && (
             <div
-              className="rounded-xl p-4 flex items-start gap-3"
+              className="rounded-xl p-4"
               style={{
-                background: result.success ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)",
+                background: result.success ? "rgba(34,197,94,0.06)" : "rgba(239,68,68,0.08)",
                 border: `1px solid ${result.success ? "rgba(34,197,94,0.2)" : "rgba(239,68,68,0.2)"}`,
               }}
             >
-              {result.success
-                ? <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#22c55e" }} />
-                : <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#ef4444" }} />}
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold mb-1" style={{ color: result.success ? "#22c55e" : "#ef4444" }}>
-                  {result.success ? "Script Ready" : "Error"}
+              <div className="flex items-start gap-3 mb-2">
+                {result.success
+                  ? <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#22c55e" }} />
+                  : <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#ef4444" }} />}
+                <p className="text-sm font-bold" style={{ color: result.success ? "#22c55e" : "#ef4444" }}>
+                  {result.success
+                    ? (result.method === "keyboard_automation" ? "Running in SpaceClaim…" : result.method === "manual_with_clipboard" ? "Script Ready — Do This Now ↓" : "Script Sent")
+                    : "Error"}
                 </p>
-                <p className="text-xs leading-relaxed" style={{ color: "#9ca3af" }}>{result.message}</p>
-                {result.scriptPath && (
-                  <div className="mt-2 flex items-center gap-1.5 text-xs" style={{ color: "#eab308" }}>
-                    <ExternalLink className="w-3 h-3" />
-                    <span className="font-mono break-all">{result.scriptPath}</span>
-                  </div>
-                )}
               </div>
+
+              {result.method === "manual_with_clipboard" && result.success && (
+                <div className="ml-8 mb-3">
+                  <div className="rounded-lg p-3 mb-2" style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.3)" }}>
+                    <p className="text-xs font-bold mb-2" style={{ color: "#eab308" }}>📋 Path auto-copied to clipboard</p>
+                    <div className="space-y-1 text-xs" style={{ color: "#d1d5db" }}>
+                      <p>1. SpaceClaim is now in focus</p>
+                      <p>2. Click <b style={{ color: "#f9fafb" }}>File → Scripting → Run Script</b></p>
+                      <p>3. Press <kbd style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontFamily: "monospace" }}>Ctrl+V</kbd> to paste path</p>
+                      <p>4. Press <kbd style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontFamily: "monospace" }}>Enter</kbd> — model created ✅</p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {result.scriptPath && (
+                <div className="ml-8 flex items-center gap-2">
+                  <span className="text-xs font-mono flex-1 truncate" style={{ color: "#6b7280" }}>{result.scriptPath}</span>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(result.scriptPath || "")}
+                    className="shrink-0 px-2 py-1 rounded-lg text-xs font-semibold transition-all"
+                    style={{ background: "rgba(234,179,8,0.15)", border: "1px solid rgba(234,179,8,0.3)", color: "#eab308" }}
+                  >Copy Path</button>
+                </div>
+              )}
+
+              {!result.success && (
+                <p className="ml-8 text-xs mt-2 leading-relaxed" style={{ color: "#9ca3af" }}>{result.message}</p>
+              )}
             </div>
           )}
         </div>

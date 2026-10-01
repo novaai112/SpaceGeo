@@ -7,6 +7,7 @@ echo  ==========================================
 echo.
 echo  Installing dependencies...
 pip install psutil --quiet 2>nul
+pip install pywin32 --quiet 2>nul
 echo.
 echo  Starting bridge server on port 7800...
 echo  Keep this window open while using SpaceGeo AI.
