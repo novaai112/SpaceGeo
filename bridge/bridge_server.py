@@ -273,32 +273,40 @@ def _execute_via_com(macro_path):
 # Method 2: pywinauto click-only navigation (no keyboard shortcuts)
 # ---------------------------------------------------------------------------
 
-def _sc_find(parent, titles, ctrl_types, timeout=2):
+def _sc_find(parent, titles, ctrl_types, timeout=3.0):
     """Find first control matching any title+ctrl_type combo inside parent."""
-    for title in titles:
-        for ct in ctrl_types:
+    start = time.time()
+    while time.time() - start < timeout:
+        for title in titles:
+            for ct in ctrl_types:
+                try:
+                    c = parent.child_window(title=title, control_type=ct)
+                    if c.exists(timeout=0.1): return c
+                except Exception: pass
+                if time.time() - start >= timeout: return None
             try:
-                c = parent.child_window(title=title, control_type=ct)
-                if c.exists(timeout=timeout): return c
+                c = parent.child_window(title=title)
+                if c.exists(timeout=0.1): return c
             except Exception: pass
-        try:
-            c = parent.child_window(title=title)
-            if c.exists(timeout=1): return c
-        except Exception: pass
+            if time.time() - start >= timeout: return None
     return None
 
 
-def _sc_find_re(parent, pattern, ctrl_types, timeout=2):
+def _sc_find_re(parent, pattern, ctrl_types, timeout=3.0):
     """Find first control whose title matches regex pattern inside parent."""
-    for ct in ctrl_types:
+    start = time.time()
+    while time.time() - start < timeout:
+        for ct in ctrl_types:
+            try:
+                c = parent.child_window(title_re=pattern, control_type=ct)
+                if c.exists(timeout=0.1): return c
+            except Exception: pass
+            if time.time() - start >= timeout: return None
         try:
-            c = parent.child_window(title_re=pattern, control_type=ct)
-            if c.exists(timeout=timeout): return c
+            c = parent.child_window(title_re=pattern)
+            if c.exists(timeout=0.1): return c
         except Exception: pass
-    try:
-        c = parent.child_window(title_re=pattern)
-        if c.exists(timeout=1): return c
-    except Exception: pass
+        if time.time() - start >= timeout: return None
     return None
 
 

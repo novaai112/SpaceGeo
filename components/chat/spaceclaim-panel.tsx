@@ -248,7 +248,7 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ script: apiData.fullScript, scriptName: apiData.scriptUsed }),
-          signal: AbortSignal.timeout(120000),
+          signal: AbortSignal.timeout(300000),
           mode: "cors",
         })
         if (bridgeRes.ok) {
