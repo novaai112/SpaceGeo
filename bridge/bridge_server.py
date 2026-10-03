@@ -244,21 +244,26 @@ def _find_sc_exe():
 
 def _execute_via_com(macro_path):
     """
-    Use SpaceClaim's COM automation interface to run a macro script directly.
+    Try several known SpaceClaim COM ProgIDs.
     Returns (success: bool, message: str)
-    SpaceClaim exposes 'SpaceClaim.Application' when running with /Scripting flag,
-    or via the registered COM server after ANSYS installation.
     """
+    progids = [
+        "SpaceClaim.Application",
+        "SpaceClaim.Application.1",
+        "AnsysSpaceClaim.Application",
+    ]
     try:
-        import win32com.client
-        import pythoncom
+        import win32com.client, pythoncom
         pythoncom.CoInitialize()
         try:
-            sc_app = win32com.client.GetActiveObject("SpaceClaim.Application")
-            sc_app.RunScript(macro_path)
-            return True, "Script executed successfully via SpaceClaim COM API."
-        except Exception as com_err:
-            return False, f"COM: {com_err}"
+            for pid in progids:
+                try:
+                    sc_app = win32com.client.GetActiveObject(pid)
+                    sc_app.RunScript(macro_path)
+                    return True, f"Script executed via COM ProgID '{pid}'."
+                except Exception:
+                    pass
+            return False, "No working SpaceClaim COM ProgID found."
         finally:
             pythoncom.CoUninitialize()
     except ImportError:
@@ -268,6 +273,81 @@ def _execute_via_com(macro_path):
 # Method 2: pywinauto click-only navigation (no keyboard shortcuts)
 # ---------------------------------------------------------------------------
 
+def _sc_find(parent, titles, ctrl_types, timeout=2):
+    """Find first control matching any title+ctrl_type combo inside parent."""
+    for title in titles:
+        for ct in ctrl_types:
+            try:
+                c = parent.child_window(title=title, control_type=ct)
+                if c.exists(timeout=timeout): return c
+            except Exception: pass
+        try:
+            c = parent.child_window(title=title)
+            if c.exists(timeout=1): return c
+        except Exception: pass
+    return None
+
+
+def _sc_find_re(parent, pattern, ctrl_types, timeout=2):
+    """Find first control whose title matches regex pattern inside parent."""
+    for ct in ctrl_types:
+        try:
+            c = parent.child_window(title_re=pattern, control_type=ct)
+            if c.exists(timeout=timeout): return c
+        except Exception: pass
+    try:
+        c = parent.child_window(title_re=pattern)
+        if c.exists(timeout=1): return c
+    except Exception: pass
+    return None
+
+
+def _fill_open_dialog(desktop, macro_path):
+    """
+    Wait for SpaceClaim's file-open dialog, type the macro path,
+    and click Open — no keyboard used.
+    Returns (success, message).
+    """
+    dlg = None
+    for _ in range(14):
+        try:
+            top = desktop.top_window()
+            t = top.window_text()
+            if any(kw in t for kw in ["Open", "Run", "Select", "Browse", "Script", "File"]):
+                dlg = top; break
+        except Exception: pass
+        time.sleep(0.5)
+    if dlg is None:
+        return False, "File dialog did not appear."
+
+    fn_edit = None
+    for ct in ["Edit", "ComboBox"]:
+        try:
+            e = dlg.child_window(control_type=ct, found_index=0)
+            if e.exists(timeout=2): fn_edit = e; break
+        except Exception: pass
+    if fn_edit is None:
+        return False, "No filename field found in dialog."
+
+    fn_edit.click_input()
+    time.sleep(0.2)
+    try:
+        fn_edit.set_edit_text(macro_path)
+    except Exception:
+        try: fn_edit.set_text(macro_path)
+        except Exception: return False, "Could not set path in dialog."
+    time.sleep(0.3)
+
+    open_btn = _sc_find(dlg,
+        titles=["Open", "Run", "OK", "&Open", "&Run", "Run Script"],
+        ctrl_types=["Button"])
+    if open_btn is None:
+        return False, "Open/Run button not found in dialog."
+    open_btn.click_input()
+    time.sleep(8.0)
+    return True, "Script submitted via file dialog."
+
+
 def _execute_via_ui_clicks(sc_hwnd, macro_path):
     """
     Navigate SpaceClaim menus using purely click_input() – no keyboard shortcuts.
@@ -275,161 +355,120 @@ def _execute_via_ui_clicks(sc_hwnd, macro_path):
     Returns (success: bool, message: str)
     """
     try:
-        from pywinauto import Desktop, Application
+        from pywinauto import Desktop
     except ImportError:
         return False, "pywinauto not installed"
 
+    import ctypes
+    # Restore + foreground SpaceClaim
     try:
-        import ctypes
-        # Restore + bring SpaceClaim to foreground
-        ctypes.windll.user32.ShowWindow(sc_hwnd, 9)   # SW_RESTORE
+        ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
         time.sleep(0.4)
         ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
-        time.sleep(0.8)
+        time.sleep(0.9)
+    except Exception: pass
 
-        desktop = Desktop(backend="uia")
-        sc_win = desktop.window(handle=sc_hwnd)
-        sc_win.set_focus()
-        time.sleep(0.6)
+    desktop = Desktop(backend="uia")
+    sc_win  = desktop.window(handle=sc_hwnd)
+    sc_win.set_focus()
+    time.sleep(0.6)
 
-        # ---- Step 1: Click the "File" ribbon / menu button ----
-        file_btn = None
-        for title in ["File", "FILE", "File "]:
-            try:
-                btn = sc_win.child_window(title=title, control_type="Button", found_index=0)
-                if btn.exists(timeout=2):
-                    file_btn = btn
-                    break
-            except Exception:
-                pass
+    BTN = ["Button", "MenuItem", "SplitButton", "ListItem"]
 
-        # Fallback: try MenuItem
-        if file_btn is None:
-            try:
-                file_btn = sc_win.child_window(title="File", control_type="MenuItem")
-                if not file_btn.exists(timeout=2):
-                    file_btn = None
-            except Exception:
-                file_btn = None
+    # ── Path A: 'Run Script' button already visible in current ribbon ──────
+    print("[Bridge] Path A: Run Script button in current ribbon ...")
+    btn = _sc_find(sc_win,
+        titles=["Run Script", "Run Script...", "Run Script\u2026"],
+        ctrl_types=BTN)
+    if btn:
+        print("[Bridge] Path A: found, clicking ...")
+        btn.click_input(); time.sleep(1.5)
+        ok, msg = _fill_open_dialog(desktop, macro_path)
+        if ok: return True, "Script executed via ribbon Run Script button."
+        print(f"[Bridge] Path A dialog failed: {msg}")
 
-        if file_btn is None:
-            return False, "Could not locate the File menu/button in SpaceClaim."
+    # ── Path B: Design tab → Script group ─────────────────────────────────
+    print("[Bridge] Path B: Design tab → Script button ...")
+    tab = _sc_find(sc_win,
+        titles=["Design", "Design "],
+        ctrl_types=["TabItem", "Button", "MenuItem"])
+    if tab:
+        tab.click_input(); time.sleep(0.7)
 
-        file_btn.click_input()
-        time.sleep(0.8)
+    for title in ["Run Script", "Run Script...", "Script", "Scripting",
+                   "Script Editor", "Edit Script", "Run Script\u2026"]:
+        btn = _sc_find(sc_win, titles=[title], ctrl_types=BTN)
+        if btn:
+            print(f"[Bridge] Path B: found '{title}', clicking ...")
+            btn.click_input(); time.sleep(1.5)
+            ok, msg = _fill_open_dialog(desktop, macro_path)
+            if ok: return True, f"Script executed via Design tab → {title}."
+            # Script Editor panel opened; look for Open/Browse inside it
+            for sub in ["Open", "Open Script", "Open File", "Browse", "Load"]:
+                sb = _sc_find(sc_win, titles=[sub], ctrl_types=["Button", "MenuItem"])
+                if sb:
+                    sb.click_input(); time.sleep(1.2)
+                    ok2, _ = _fill_open_dialog(desktop, macro_path)
+                    if ok2: return True, f"Script executed via Script Editor → {sub}."
+            break
 
-        # ---- Step 2: Click "Scripting" in the File menu ----
-        scripting_item = None
-        for title in ["Scripting", "Script", "Run Script"]:
-            try:
-                item = desktop.top_window().child_window(title=title, control_type="MenuItem")
-                if item.exists(timeout=2):
-                    scripting_item = item
-                    break
-            except Exception:
-                pass
+    # ── Path C: File backstage (WPF — stays inside sc_win, not a popup) ───
+    print("[Bridge] Path C: File backstage → Scripting → Run Script ...")
+    file_btn = _sc_find(sc_win,
+        titles=["File", "FILE", "File "],
+        ctrl_types=["Button", "MenuItem", "TabItem"])
+    if file_btn is None:
+        return False, "Cannot locate the File button in SpaceClaim."
 
-        if scripting_item is None:
-            # Try as Button inside the opened menu panel
-            try:
-                scripting_item = desktop.top_window().child_window(title_re="Script.*", found_index=0)
-            except Exception:
-                pass
+    file_btn.click_input(); time.sleep(1.2)
 
-        if scripting_item is None:
-            return False, "Could not find 'Scripting' menu item after opening File menu."
+    # SpaceClaim's WPF Backstage keeps items as children of sc_win.
+    # Search sc_win first, then any new top window as fallback.
+    scripting = _sc_find(sc_win,
+        titles=["Scripting", "Script", "Scripting "],
+        ctrl_types=["MenuItem", "Button", "ListItem", "TabItem", "Text"])
+    if scripting is None:
+        scripting = _sc_find_re(sc_win, pattern=r"Script.*",
+                                ctrl_types=["MenuItem", "Button", "ListItem"])
+    if scripting is None:
+        try:
+            top = desktop.top_window()
+            if top.handle != sc_hwnd:
+                scripting = _sc_find(top,
+                    titles=["Scripting", "Script"],
+                    ctrl_types=["MenuItem", "Button", "ListItem"])
+        except Exception: pass
 
-        scripting_item.click_input()
-        time.sleep(0.8)
+    if scripting is None:
+        return False, (
+            "Opened File menu but could not find 'Scripting' item.\n"
+            "Please run manually: File \u2192 Scripting \u2192 Run Script."
+        )
 
-        # ---- Step 3: Click "Run Script…" submenu or button ----
-        run_script_item = None
-        for title in ["Run Script", "Run Script...", "Run Script…", "Run"]:
-            try:
-                item = desktop.top_window().child_window(title=title, control_type="MenuItem")
-                if item.exists(timeout=2):
-                    run_script_item = item
-                    break
-            except Exception:
-                pass
+    print("[Bridge] Path C: clicking Scripting ...")
+    scripting.click_input(); time.sleep(0.9)
 
-        if run_script_item is None:
-            try:
-                run_script_item = desktop.top_window().child_window(title_re="Run.*Script.*", found_index=0)
-            except Exception:
-                pass
+    run_item = _sc_find(sc_win,
+        titles=["Run Script", "Run Script...", "Run Script\u2026", "Run"],
+        ctrl_types=["MenuItem", "Button", "ListItem"])
+    if run_item is None:
+        try:
+            top = desktop.top_window()
+            if top.handle != sc_hwnd:
+                run_item = _sc_find(top,
+                    titles=["Run Script", "Run Script...", "Run Script\u2026"],
+                    ctrl_types=["MenuItem", "Button", "ListItem"])
+        except Exception: pass
 
-        if run_script_item is None:
-            # "Scripting" might have directly opened the script editor panel
-            # Try clicking "Open File" or "Open" button in the editor
-            try:
-                run_script_item = desktop.top_window().child_window(title_re="Open.*|Browse.*", control_type="Button", found_index=0)
-            except Exception:
-                pass
+    if run_item is None:
+        return False, "Found 'Scripting' but could not find 'Run Script' sub-item."
 
-        if run_script_item is None:
-            return False, "Could not find 'Run Script' menu item."
+    print("[Bridge] Path C: clicking Run Script ...")
+    run_item.click_input(); time.sleep(1.5)
 
-        run_script_item.click_input()
-        time.sleep(1.2)
-
-        # ---- Step 4: Handle the "Open / Run Script" file dialog ----
-        # Find the file dialog
-        dlg = None
-        for attempt in range(8):
-            try:
-                top = desktop.top_window()
-                top_title = top.window_text()
-                if any(kw in top_title for kw in ["Open", "Run Script", "Select", "Browse", "Script"]):
-                    dlg = top
-                    break
-            except Exception:
-                pass
-            time.sleep(0.5)
-
-        if dlg is None:
-            return False, "File dialog did not appear after clicking 'Run Script'."
-
-        # Fill the filename edit box by clicking it and setting text
-        fn_edit = None
-        for ctrl_type in ["Edit", "ComboBox"]:
-            try:
-                edit = dlg.child_window(control_type=ctrl_type, found_index=0)
-                if edit.exists(timeout=2):
-                    fn_edit = edit
-                    break
-            except Exception:
-                pass
-
-        if fn_edit is None:
-            return False, "Could not find the filename field in the file dialog."
-
-        fn_edit.click_input()
-        time.sleep(0.2)
-        fn_edit.set_edit_text(macro_path)
-        time.sleep(0.3)
-
-        # ---- Step 5: Click the Open / Run / OK button (no keyboard Enter) ----
-        open_btn = None
-        for btn_title in ["Open", "Run", "OK", "&Open", "&Run"]:
-            try:
-                btn = dlg.child_window(title=btn_title, control_type="Button")
-                if btn.exists(timeout=2):
-                    open_btn = btn
-                    break
-            except Exception:
-                pass
-
-        if open_btn is None:
-            return False, "Could not find the Open/Run button in the file dialog."
-
-        open_btn.click_input()
-        time.sleep(8.0)   # Wait for SpaceClaim to execute the script
-
-        return True, "Script executed via SpaceClaim UI (File → Scripting → Run Script)."
-
-    except Exception as exc:
-        return False, f"UI automation error: {exc}"
+    ok, msg = _fill_open_dialog(desktop, macro_path)
+    if ok: return True, "Script executed via File \u2192 Scripting \u2192 Run Script."
+    return False, f"File dialog error: {msg}"
 
 
 # ---------------------------------------------------------------------------
