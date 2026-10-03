@@ -18,7 +18,7 @@ interface ScriptResult {
   scriptPath?: string
   scriptUsed?: string
   method?: string
-  clipboardReady?: boolean
+  automationError?: string
 }
 
 const FIELD_GROUPS = {
@@ -227,6 +227,7 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
     }
 
     try {
+      // Step 1: Build the script via Next.js API
       const apiRes = await fetch("/api/spaceclaim", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -240,26 +241,27 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
         return
       }
 
-      setResult({ success: true, message: "Script ready — automating SpaceClaim now…", method: "keyboard_automation" })
-
+      // Step 2: Send script to bridge for execution in SpaceClaim
       let bridgeResult: ScriptResult
       try {
         const bridgeRes = await fetch("http://localhost:7800/spaceclaim", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ script: apiData.fullScript, scriptName: apiData.scriptUsed }),
-          signal: AbortSignal.timeout(90000),
+          signal: AbortSignal.timeout(120000),
           mode: "cors",
         })
         if (bridgeRes.ok) {
           bridgeResult = await bridgeRes.json()
         } else {
-          bridgeResult = { success: false, message: `Bridge responded with error ${bridgeRes.status}` }
+          bridgeResult = { success: false, message: `Bridge responded with HTTP ${bridgeRes.status}` }
         }
       } catch {
         bridgeResult = {
           success: false,
-          message: "Cannot reach bridge on localhost:7800. Make sure bridge_server.py is running (run bridge/START_BRIDGE.bat).",
+          message:
+            "Cannot reach bridge on localhost:7800.\n" +
+            "Make sure the bridge is running: open bridge/START_BRIDGE.bat",
         }
       }
 
@@ -444,27 +446,45 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
                   : <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" style={{ color: "#ef4444" }} />}
                 <p className="text-sm font-bold" style={{ color: result.success ? "#22c55e" : "#ef4444" }}>
                   {result.success
-                    ? (result.method === "keyboard_automation" ? "Running in SpaceClaim…" : result.method === "manual_with_clipboard" ? "Script Ready — Do This Now ↓" : "Script Sent")
+                    ? result.method === "com_api"
+                      ? "Model created via COM API ✅"
+                      : result.method === "ui_clicks"
+                      ? "Model created via SpaceClaim UI ✅"
+                      : result.method === "launch_with_script"
+                      ? "SpaceClaim launching…"
+                      : "Script Executed"
+                    : result.method === "manual_required" || result.method === "not_found"
+                    ? "Manual Steps Required"
                     : "Error"}
                 </p>
               </div>
 
-              {result.method === "manual_with_clipboard" && result.success && (
+              {/* Success: show which method worked */}
+              {result.success && result.method && (
+                <div className="ml-8 mb-2">
+                  <span className="text-xs px-2 py-0.5 rounded-full font-mono" style={{ background: "rgba(34,197,94,0.12)", color: "#86efac" }}>
+                    method: {result.method}
+                  </span>
+                </div>
+              )}
+
+              {/* Manual steps when automation could not run */}
+              {!result.success && (result.method === "manual_required" || result.method === "not_found") && (
                 <div className="ml-8 mb-3">
-                  <div className="rounded-lg p-3 mb-2" style={{ background: "rgba(234,179,8,0.1)", border: "1px solid rgba(234,179,8,0.3)" }}>
-                    <p className="text-xs font-bold mb-2" style={{ color: "#eab308" }}>📋 Path auto-copied to clipboard</p>
+                  <div className="rounded-lg p-3" style={{ background: "rgba(234,179,8,0.08)", border: "1px solid rgba(234,179,8,0.25)" }}>
+                    <p className="text-xs font-bold mb-2" style={{ color: "#eab308" }}>Run the script manually:</p>
                     <div className="space-y-1 text-xs" style={{ color: "#d1d5db" }}>
-                      <p>1. SpaceClaim is now in focus</p>
+                      <p>1. Open SpaceClaim</p>
                       <p>2. Click <b style={{ color: "#f9fafb" }}>File → Scripting → Run Script</b></p>
-                      <p>3. Press <kbd style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontFamily: "monospace" }}>Ctrl+V</kbd> to paste path</p>
-                      <p>4. Press <kbd style={{ background: "rgba(255,255,255,0.15)", padding: "1px 5px", borderRadius: 4, fontFamily: "monospace" }}>Enter</kbd> — model created ✅</p>
+                      <p>3. Browse to the script path below and click <b style={{ color: "#f9fafb" }}>Open</b></p>
                     </div>
                   </div>
                 </div>
               )}
 
+              {/* Script path with copy button */}
               {result.scriptPath && (
-                <div className="ml-8 flex items-center gap-2">
+                <div className="ml-8 flex items-center gap-2 mt-1">
                   <span className="text-xs font-mono flex-1 truncate" style={{ color: "#6b7280" }}>{result.scriptPath}</span>
                   <button
                     onClick={() => navigator.clipboard.writeText(result.scriptPath || "")}
@@ -474,8 +494,9 @@ export function SpaceClaimPanel({ modelType, initialParams, onClose }: SCPanelPr
                 </div>
               )}
 
-              {!result.success && (
-                <p className="ml-8 text-xs mt-2 leading-relaxed" style={{ color: "#9ca3af" }}>{result.message}</p>
+              {/* Error message for non-manual failures */}
+              {!result.success && result.method !== "manual_required" && result.method !== "not_found" && (
+                <p className="ml-8 text-xs mt-2 leading-relaxed whitespace-pre-wrap" style={{ color: "#9ca3af" }}>{result.message}</p>
               )}
             </div>
           )}

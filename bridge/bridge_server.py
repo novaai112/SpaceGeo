@@ -1,4 +1,4 @@
-import json, os, subprocess, sys, tempfile, threading
+import json, os, subprocess, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from socketserver import ThreadingMixIn
 from urllib.parse import parse_qs, urlparse
@@ -163,194 +163,399 @@ def execute_python_script(script, software):
     except subprocess.TimeoutExpired: return {"success": False, "message": "Script timed out after 60s"}
     except Exception as e: return {"success": False, "message": str(e)}
 
+# ---------------------------------------------------------------------------
+# SpaceClaim helpers
+# ---------------------------------------------------------------------------
+
 def _find_sc_hwnd():
+    """Return the HWND of the main SpaceClaim window, or None."""
     try:
         import win32gui
-        result = []
+        results = []
         def cb(hwnd, _):
             try:
-                import win32gui as wg
-                if wg.IsWindowVisible(hwnd):
-                    title = wg.GetWindowText(hwnd)
+                if win32gui.IsWindowVisible(hwnd):
+                    title = win32gui.GetWindowText(hwnd)
                     if "SpaceClaim" in title and "Bridge" not in title:
-                        result.append((hwnd, title))
-            except Exception: pass
+                        results.append((hwnd, title))
+            except Exception:
+                pass
         win32gui.EnumWindows(cb, None)
-        return result[0][0] if result else None
-    except Exception: return None
+        return results[0][0] if results else None
+    except Exception:
+        return None
 
 def _find_sc_exe():
+    """Return the path to SpaceClaim.exe if installed, or None."""
     if HAS_PSUTIL:
-        for proc in psutil.process_iter(["name","exe"]):
+        for proc in psutil.process_iter(["name", "exe"]):
             try:
                 if "spaceclaim" in proc.info["name"].lower():
-                    return proc.info["exe"]
-            except Exception: pass
-    known = [
-        r"C:\Program Files\ANSYS Inc\v241\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v232\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v231\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v222\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v221\scdm\SpaceClaim.exe",
-        r"C:\Program Files\ANSYS Inc\v212\scdm\SpaceClaim.exe",
+                    exe = proc.info.get("exe")
+                    if exe:
+                        return exe
+            except Exception:
+                pass
+
+    # Comprehensive list of known installation paths (ANSYS 2019‒2024)
+    known = []
+    for ver in ["v251", "v242", "v241", "v232", "v231", "v222", "v221", "v212", "v211",
+                "v202", "v201", "v195", "v194", "v193", "v192", "v191"]:
+        known.append(rf"C:\Program Files\ANSYS Inc\{ver}\scdm\SpaceClaim.exe")
+        known.append(rf"C:\Program Files\Ansys Inc\{ver}\scdm\SpaceClaim.exe")
+    known += [
         r"C:\Program Files\SpaceClaim\SpaceClaim.exe",
+        r"C:\Program Files (x86)\SpaceClaim\SpaceClaim.exe",
     ]
     for p in known:
-        if os.path.exists(p): return p
-    return None
+        if os.path.exists(p):
+            return p
 
-def _run_sc_automation(sc_hwnd, macro_path):
-    import time, ctypes
+    # Last-resort: registry search
     try:
-        ctypes.windll.user32.ShowWindow(sc_hwnd, 9)
-        time.sleep(0.3)
-        ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
-        time.sleep(1.2)
-    except Exception:
-        pass
-
-    try:
-        from pywinauto import Desktop
-        from pywinauto.keyboard import send_keys
-
-        app_desktop = Desktop(backend="uia")
-        sc_win = app_desktop.window(handle=sc_hwnd)
-        sc_win.set_focus()
-        time.sleep(0.5)
-        send_keys("{ESC}", pause=0.05)
-        time.sleep(0.3)
-
-        # Step 1: click the Design ribbon tab so Script button is visible
-        for tab_title in ["Design", "Design "]:
-            try:
-                tab = sc_win.child_window(title=tab_title, control_type="TabItem")
-                if tab.exists(timeout=1):
-                    tab.click_input()
-                    time.sleep(0.5)
-                    break
-            except Exception:
-                pass
-
-        # Step 2: click the Script button on the Design ribbon
-        script_editor_opened = False
-        for btn_title in ["Script", "Scripting", "Script Editor"]:
-            try:
-                btn = sc_win.child_window(title=btn_title, control_type="Button")
-                if btn.exists(timeout=1):
-                    btn.click_input()
-                    time.sleep(1.5)
-                    script_editor_opened = True
-                    break
-            except Exception:
-                pass
-
-        if not script_editor_opened:
-            # Try via split button or custom control
-            try:
-                btn = sc_win.child_window(title_re="Script.*", control_type="SplitButton")
-                btn.click_input()
-                time.sleep(1.5)
-                script_editor_opened = True
-            except Exception:
-                pass
-
-        # Step 3: open the file in the Script Editor
-        # Script Editor should now be focused - use Ctrl+O to open file dialog
-        sc_win.set_focus()
-        time.sleep(0.5)
-        send_keys("^o", pause=0.1)
-        time.sleep(1.5)
-
-        # Handle the file open dialog - type path and press Enter
-        # First try clicking filename field and pasting
-        try:
-            open_dlg = app_desktop.top_window()
-            fn_edit = open_dlg.child_window(control_type="Edit")
-            fn_edit.set_text("")
-            fn_edit.type_keys(macro_path, with_spaces=True)
-            time.sleep(0.2)
-            try:
-                open_dlg.child_window(title_re="Open|Run|OK").click_input()
-            except Exception:
-                send_keys("{ENTER}", pause=0.05)
-        except Exception:
-            # Fallback: select all + paste from clipboard
-            send_keys("^a", pause=0.05)
-            time.sleep(0.1)
-            send_keys("^v", pause=0.05)
-            time.sleep(0.2)
-            send_keys("{ENTER}", pause=0.05)
-        time.sleep(1.5)
-
-        # Step 4: press F5 to run the script in the editor
-        sc_win.set_focus()
-        time.sleep(0.5)
-        send_keys("{F5}", pause=0.05)
-        time.sleep(6.0)
-
+        import winreg
+        for reg_root in [winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER]:
+            for reg_path in [r"SOFTWARE\ANSYS Inc\ANSYS SpaceClaim",
+                              r"SOFTWARE\WOW6432Node\ANSYS Inc\ANSYS SpaceClaim"]:
+                try:
+                    key = winreg.OpenKey(reg_root, reg_path)
+                    i = 0
+                    while True:
+                        try:
+                            ver_name = winreg.EnumKey(key, i)
+                            ver_key = winreg.OpenKey(key, ver_name)
+                            exe_path, _ = winreg.QueryValueEx(ver_key, "InstallPath")
+                            candidate = os.path.join(exe_path, "SpaceClaim.exe")
+                            if os.path.exists(candidate):
+                                return candidate
+                            i += 1
+                        except OSError:
+                            break
+                except Exception:
+                    pass
     except ImportError:
         pass
-    except Exception:
-        pass
+
+    return None
+
+# ---------------------------------------------------------------------------
+# Method 1: SpaceClaim COM automation (best – no keyboard/mouse interaction)
+# ---------------------------------------------------------------------------
+
+def _execute_via_com(macro_path):
+    """
+    Use SpaceClaim's COM automation interface to run a macro script directly.
+    Returns (success: bool, message: str)
+    SpaceClaim exposes 'SpaceClaim.Application' when running with /Scripting flag,
+    or via the registered COM server after ANSYS installation.
+    """
+    try:
+        import win32com.client
+        import pythoncom
+        pythoncom.CoInitialize()
+        try:
+            sc_app = win32com.client.GetActiveObject("SpaceClaim.Application")
+            sc_app.RunScript(macro_path)
+            return True, "Script executed successfully via SpaceClaim COM API."
+        except Exception as com_err:
+            return False, f"COM: {com_err}"
+        finally:
+            pythoncom.CoUninitialize()
+    except ImportError:
+        return False, "win32com not available"
+
+# ---------------------------------------------------------------------------
+# Method 2: pywinauto click-only navigation (no keyboard shortcuts)
+# ---------------------------------------------------------------------------
+
+def _execute_via_ui_clicks(sc_hwnd, macro_path):
+    """
+    Navigate SpaceClaim menus using purely click_input() – no keyboard shortcuts.
+    Path: File menu → Scripting → Run Script… → select file → click Open/Run
+    Returns (success: bool, message: str)
+    """
+    try:
+        from pywinauto import Desktop, Application
+    except ImportError:
+        return False, "pywinauto not installed"
+
+    try:
+        import ctypes
+        # Restore + bring SpaceClaim to foreground
+        ctypes.windll.user32.ShowWindow(sc_hwnd, 9)   # SW_RESTORE
+        time.sleep(0.4)
+        ctypes.windll.user32.SetForegroundWindow(sc_hwnd)
+        time.sleep(0.8)
+
+        desktop = Desktop(backend="uia")
+        sc_win = desktop.window(handle=sc_hwnd)
+        sc_win.set_focus()
+        time.sleep(0.6)
+
+        # ---- Step 1: Click the "File" ribbon / menu button ----
+        file_btn = None
+        for title in ["File", "FILE", "File "]:
+            try:
+                btn = sc_win.child_window(title=title, control_type="Button", found_index=0)
+                if btn.exists(timeout=2):
+                    file_btn = btn
+                    break
+            except Exception:
+                pass
+
+        # Fallback: try MenuItem
+        if file_btn is None:
+            try:
+                file_btn = sc_win.child_window(title="File", control_type="MenuItem")
+                if not file_btn.exists(timeout=2):
+                    file_btn = None
+            except Exception:
+                file_btn = None
+
+        if file_btn is None:
+            return False, "Could not locate the File menu/button in SpaceClaim."
+
+        file_btn.click_input()
+        time.sleep(0.8)
+
+        # ---- Step 2: Click "Scripting" in the File menu ----
+        scripting_item = None
+        for title in ["Scripting", "Script", "Run Script"]:
+            try:
+                item = desktop.top_window().child_window(title=title, control_type="MenuItem")
+                if item.exists(timeout=2):
+                    scripting_item = item
+                    break
+            except Exception:
+                pass
+
+        if scripting_item is None:
+            # Try as Button inside the opened menu panel
+            try:
+                scripting_item = desktop.top_window().child_window(title_re="Script.*", found_index=0)
+            except Exception:
+                pass
+
+        if scripting_item is None:
+            return False, "Could not find 'Scripting' menu item after opening File menu."
+
+        scripting_item.click_input()
+        time.sleep(0.8)
+
+        # ---- Step 3: Click "Run Script…" submenu or button ----
+        run_script_item = None
+        for title in ["Run Script", "Run Script...", "Run Script…", "Run"]:
+            try:
+                item = desktop.top_window().child_window(title=title, control_type="MenuItem")
+                if item.exists(timeout=2):
+                    run_script_item = item
+                    break
+            except Exception:
+                pass
+
+        if run_script_item is None:
+            try:
+                run_script_item = desktop.top_window().child_window(title_re="Run.*Script.*", found_index=0)
+            except Exception:
+                pass
+
+        if run_script_item is None:
+            # "Scripting" might have directly opened the script editor panel
+            # Try clicking "Open File" or "Open" button in the editor
+            try:
+                run_script_item = desktop.top_window().child_window(title_re="Open.*|Browse.*", control_type="Button", found_index=0)
+            except Exception:
+                pass
+
+        if run_script_item is None:
+            return False, "Could not find 'Run Script' menu item."
+
+        run_script_item.click_input()
+        time.sleep(1.2)
+
+        # ---- Step 4: Handle the "Open / Run Script" file dialog ----
+        # Find the file dialog
+        dlg = None
+        for attempt in range(8):
+            try:
+                top = desktop.top_window()
+                top_title = top.window_text()
+                if any(kw in top_title for kw in ["Open", "Run Script", "Select", "Browse", "Script"]):
+                    dlg = top
+                    break
+            except Exception:
+                pass
+            time.sleep(0.5)
+
+        if dlg is None:
+            return False, "File dialog did not appear after clicking 'Run Script'."
+
+        # Fill the filename edit box by clicking it and setting text
+        fn_edit = None
+        for ctrl_type in ["Edit", "ComboBox"]:
+            try:
+                edit = dlg.child_window(control_type=ctrl_type, found_index=0)
+                if edit.exists(timeout=2):
+                    fn_edit = edit
+                    break
+            except Exception:
+                pass
+
+        if fn_edit is None:
+            return False, "Could not find the filename field in the file dialog."
+
+        fn_edit.click_input()
+        time.sleep(0.2)
+        fn_edit.set_edit_text(macro_path)
+        time.sleep(0.3)
+
+        # ---- Step 5: Click the Open / Run / OK button (no keyboard Enter) ----
+        open_btn = None
+        for btn_title in ["Open", "Run", "OK", "&Open", "&Run"]:
+            try:
+                btn = dlg.child_window(title=btn_title, control_type="Button")
+                if btn.exists(timeout=2):
+                    open_btn = btn
+                    break
+            except Exception:
+                pass
+
+        if open_btn is None:
+            return False, "Could not find the Open/Run button in the file dialog."
+
+        open_btn.click_input()
+        time.sleep(8.0)   # Wait for SpaceClaim to execute the script
+
+        return True, "Script executed via SpaceClaim UI (File → Scripting → Run Script)."
+
+    except Exception as exc:
+        return False, f"UI automation error: {exc}"
 
 
+# ---------------------------------------------------------------------------
+# Method 3: Launch SpaceClaim with /RunScript= command-line argument
+# ---------------------------------------------------------------------------
+
+def _launch_sc_with_script(sc_exe, macro_path):
+    """Launch SpaceClaim.exe with /RunScript= flag. Returns (success, message)."""
+    try:
+        subprocess.Popen(
+            [sc_exe, f"/RunScript={macro_path}"],
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
+        )
+        return True, (
+            "SpaceClaim is launching with your script attached.\n"
+            "The model will be created automatically once SpaceClaim finishes loading."
+        )
+    except Exception as exc:
+        return False, f"Failed to launch SpaceClaim: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Main orchestration: tries COM → UI clicks → launch with script
+# ---------------------------------------------------------------------------
 
 def execute_spaceclaim_script(script, script_name="sg_macro.py"):
-    import time, ctypes
-    macro_dir = os.path.join(os.environ.get("APPDATA", tempfile.gettempdir()), "SpaceClaim", "Macros")
+    """
+    Save the script to the SpaceClaim Macros folder, then execute it using
+    the best available method:
+      1. SpaceClaim COM API  (best – fully silent, no UI interaction)
+      2. pywinauto click-only navigation  (no keyboard shortcuts)
+      3. Launch SpaceClaim.exe /RunScript=  (if not already running)
+    Returns a JSON-serialisable dict with keys: success, message, method, scriptPath
+    """
+    # ---- Save script to a stable path SpaceClaim can access ----
+    macro_dir = os.path.join(
+        os.environ.get("APPDATA", tempfile.gettempdir()),
+        "SpaceClaim", "Macros"
+    )
     os.makedirs(macro_dir, exist_ok=True)
     macro_path = os.path.join(macro_dir, script_name)
     with open(macro_path, "w", encoding="utf-8") as f:
         f.write(script)
 
-    clipboard_ok = False
-    try:
-        import win32clipboard
-        win32clipboard.OpenClipboard()
-        win32clipboard.EmptyClipboard()
-        win32clipboard.SetClipboardText(macro_path)
-        win32clipboard.CloseClipboard()
-        clipboard_ok = True
-    except Exception:
-        pass
+    print(f"[Bridge] Script saved → {macro_path}")
 
+    # ---- Detect SpaceClaim state ----
     sc_hwnd = _find_sc_hwnd()
+    sc_exe  = _find_sc_exe()
+    is_running = sc_hwnd is not None
 
-    if sc_hwnd:
-        try:
-            import ctypes as _ct
-            _ct.windll.user32.ShowWindow(sc_hwnd, 9)
-            _ct.windll.user32.SetForegroundWindow(sc_hwnd)
-        except Exception:
-            pass
+    print(f"[Bridge] SpaceClaim running={is_running}  exe={sc_exe}")
 
-        t = threading.Thread(target=_run_sc_automation, args=(sc_hwnd, macro_path), daemon=True)
-        t.start()
+    if is_running:
+        # --- Method 1: COM API ---
+        print("[Bridge] Trying Method 1: COM API ...")
+        ok, msg = _execute_via_com(macro_path)
+        if ok:
+            print(f"[Bridge] COM success: {msg}")
+            return {
+                "success": True,
+                "message": "✅ Script executed in SpaceClaim via COM API — model created.",
+                "method": "com_api",
+                "scriptPath": macro_path,
+            }
+        print(f"[Bridge] COM failed: {msg}")
 
+        # --- Method 2: UI click navigation (no keyboard shortcuts) ---
+        print("[Bridge] Trying Method 2: UI click navigation ...")
+        ok, msg = _execute_via_ui_clicks(sc_hwnd, macro_path)
+        if ok:
+            print(f"[Bridge] UI click success: {msg}")
+            return {
+                "success": True,
+                "message": "✅ Script executed in SpaceClaim via File → Scripting → Run Script.",
+                "method": "ui_clicks",
+                "scriptPath": macro_path,
+            }
+        print(f"[Bridge] UI click failed: {msg}")
+
+        # Both automation methods failed — return instructions
         return {
-            "success": True,
-            "message": "SpaceClaim focused! Navigating File \u2192 Scripting \u2192 Run Script\u2026\n\nIf model doesn\u2019t appear in ~15s, use manual steps below.",
+            "success": False,
+            "message": (
+                f"Script saved to:\n{macro_path}\n\n"
+                "SpaceClaim is running but automation could not execute the script.\n"
+                "Please manually: File → Scripting → Run Script → select the path above."
+            ),
+            "method": "manual_required",
             "scriptPath": macro_path,
-            "clipboardReady": clipboard_ok,
-            "method": "keyboard_automation",
+            "automationError": msg,
         }
 
-    sc_exe = _find_sc_exe()
-    if sc_exe:
-        subprocess.Popen([sc_exe, f"/RunScript={macro_path}"])
-        return {
-            "success": True,
-            "message": "SpaceClaim launching with your script. A new window will open.",
-            "scriptPath": macro_path,
-            "method": "launch_with_script",
-        }
+    else:
+        # SpaceClaim is NOT running — launch it with the script
+        if sc_exe:
+            print("[Bridge] Trying Method 3: Launch SpaceClaim with /RunScript ...")
+            ok, msg = _launch_sc_with_script(sc_exe, macro_path)
+            if ok:
+                return {
+                    "success": True,
+                    "message": msg,
+                    "method": "launch_with_script",
+                    "scriptPath": macro_path,
+                }
+            return {
+                "success": False,
+                "message": msg,
+                "method": "launch_failed",
+                "scriptPath": macro_path,
+            }
 
-    return {
-        "success": False,
-        "message": f"SpaceClaim not found.\nScript saved to: {macro_path}\nOpen SpaceClaim \u2192 File \u2192 Scripting \u2192 Run Script",
-        "scriptPath": macro_path,
-        "clipboardReady": clipboard_ok,
-    }
+        # SpaceClaim not found anywhere
+        return {
+            "success": False,
+            "message": (
+                "SpaceClaim is not running and could not be found on this system.\n\n"
+                f"Script has been saved to:\n{macro_path}\n\n"
+                "Steps to run manually:\n"
+                "  1. Open SpaceClaim\n"
+                "  2. File → Scripting → Run Script\n"
+                "  3. Browse to the path above and click Open"
+            ),
+            "method": "not_found",
+            "scriptPath": macro_path,
+        }
 
 
 class BridgeHandler(BaseHTTPRequestHandler):
@@ -385,7 +590,7 @@ class BridgeHandler(BaseHTTPRequestHandler):
             sw = params.get("software",[None])[0]
             self.send_json(check_cad_status(sw) if sw else check_all_status())
         elif parsed.path == "/all": self.send_json(check_all_status())
-        elif parsed.path == "/health": self.send_json({"status":"ok","bridge":"SpaceGeo CAD Bridge v2.0","psutil":HAS_PSUTIL})
+        elif parsed.path == "/health": self.send_json({"status":"ok","bridge":"SpaceGeo CAD Bridge v3.0","psutil":HAS_PSUTIL})
         elif parsed.path == "/installed":
             inst = {}
             for cid,cad in CAD_DEFINITIONS.items():
@@ -410,16 +615,23 @@ class BridgeHandler(BaseHTTPRequestHandler):
             script = data.get("script","")
             if not script: self.send_json({"error":"No script"},400); return
             script_name = data.get("scriptName", "sg_macro.py")
-            self.send_json(execute_spaceclaim_script(script, script_name))
+            # Run synchronously so the response reflects actual execution result
+            result = execute_spaceclaim_script(script, script_name)
+            self.send_json(result)
         else: self.send_json({"error":"Unknown endpoint"},404)
 
 def main():
     port = 7800
-    print("="*55)
-    print("  SpaceGeo AI - Local CAD Bridge Server v2.1")
-    print("="*55)
+    print("="*60)
+    print("  SpaceGeo AI - Local CAD Bridge Server v3.0")
+    print("="*60)
     print(f"  Listening on: http://localhost:{port}")
-    print(f"  psutil: {HAS_PSUTIL}")
+    print(f"  psutil available: {HAS_PSUTIL}")
+    print()
+    print("  Execution methods (in priority order):")
+    print("    1. SpaceClaim COM API       (silent, no UI interaction)")
+    print("    2. pywinauto click-only     (no keyboard shortcuts)")
+    print("    3. Launch with /RunScript=  (if SpaceClaim not open)")
     print()
     print("  GET  /health  /status?software=  /all  /installed")
     print("  GET  /context?software=solidworks")
@@ -427,13 +639,12 @@ def main():
     print("  POST /spaceclaim    { script, scriptName }")
     print()
     print("  Press Ctrl+C to stop")
-    print("="*55)
+    print("="*60)
     class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
     server = ThreadingHTTPServer(("localhost", port), BridgeHandler)
     try: server.serve_forever()
     except KeyboardInterrupt: print("\n  Bridge stopped."); server.server_close()
-
 
 
 if __name__ == "__main__": main()
